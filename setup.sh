@@ -79,7 +79,14 @@ say "6. The llm-launch command"
 mkdir -p "$HOME/.local/bin"
 printf '#!/usr/bin/env bash\nexec python3 "%s/llm-launch.py" "$@"\n' "$KIT" > "$HOME/.local/bin/llm-launch"
 chmod +x "$HOME/.local/bin/llm-launch"
-echo "   From now on, run  llm-launch  in any project folder (in a new terminal; it lives in ~/.local/bin)."
+# Pop/Ubuntu add ~/.local/bin to PATH only at login, and only if it existed then: make new terminals see it right away
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) echo "   From now on, run  llm-launch  in any project folder." ;;
+    *)
+        grep -qs 'local-llm-8gb-kit: ~/.local/bin' "$HOME/.bashrc" || \
+            printf '\n# local-llm-8gb-kit: ~/.local/bin on PATH (llm-launch)\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n' >> "$HOME/.bashrc"
+        echo "   From now on, run  llm-launch  in any project folder: open a new terminal first (~/.local/bin was added to ~/.bashrc)." ;;
+esac
 
 say "Done."
 if [ "$REBOOT" = 1 ]; then
