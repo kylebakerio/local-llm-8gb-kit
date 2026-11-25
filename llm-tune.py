@@ -225,8 +225,14 @@ def main():
     os.makedirs(L.STATE_DIR, exist_ok=True)
     with open(TUNED + ".tmp", "w") as f: json.dump(t, f, indent=1)
     os.replace(TUNED + ".tmp", TUNED)
-    print(f"\nSaved ({rec['minutes']} min): llm-launch now suggests {sug:,} tokens for {model['name']} with these settings.")
-    print(f"{D}Results: {TUNED}   logs: {logdir}{N}")
+    setting = L.setting_label(c["key"])
+    print(f"\n{B}Result{N} ({rec['minutes']} min): {model['name']}  ({setting})  on {gname}")
+    print(f"   context that held   {held:>9,} tokens")
+    print(f"   suggested           {sug:>9,} tokens   (llm-launch suggests this from now on)")
+    if sp: print("\n".join(L.speed_lines(rec, indent="   ")))
+    print(f"\n{B}All measurements on this machine{N}  (also: llm-launch --results, or r at its model menu)")
+    print("\n".join(L.results_table(t)))
+    print(f"{D}Saved in {TUNED}   logs: {logdir}{N}")
     return 0
 
 

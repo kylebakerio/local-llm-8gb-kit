@@ -121,7 +121,10 @@ The contexts the launcher suggests were measured on a test GPU of the same gener
 - **the largest context that loads and holds:** it fills the context to 97% with real text, then sends requests at a few depths;
 - **reading and writing speed** at 4k, 32k and near that maximum.
 
-The launcher then suggests the measured context for that model and setting ("Measured on this machine").
+At the end it prints a table of this run and of every measurement on this machine. The launcher then:
+- suggests the measured context for that model and setting;
+- shows the saved numbers beside the model in its list, and in full at the context question;
+- shows the whole table on demand: `r` at its model menu, or `llm-launch --results`.
 
 ```bash
 llm-tune

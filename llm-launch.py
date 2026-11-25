@@ -4,6 +4,7 @@
     python3 llm-launch.py            (run it from the project folder you want opencode to work in)
     python3 llm-launch.py --fetch-plugins  download the task-driver plugin (setup.sh does this; so does the first launch)
     python3 llm-launch.py --add-dir DIR    also look for models in DIR
+    python3 llm-launch.py --results        the measurements llm-tune saved on this machine (context that fits, speed)
     python3 llm-launch.py --inventory      find the models this kit tested anywhere in your home folder, say what is known
                                            about each, and add their folders to the search path (setup.sh runs this)
     python3 llm-launch.py --attach [--port 8080]
@@ -522,16 +523,26 @@ def inventory(st):
 def pick_model(st):
     while True:
         models = scan_models(st)
+        tuned = load_tuned()
         print(f"\n{B}Models{N}  {D}(Hugging Face downloads, ~/models, ~/Downloads, LM Studio's folders, and folders you added){N}")
         if not models: print("   none found yet")
         for i, m in enumerate(models, 1):
             rec = RECOMMENDED.get(m["name"]) or {}
             best = max([x for x in (rec.get("mtp_off"), rec.get("mtp_on")) if x] or [0])
             tag = f"  {D}{'expected' if rec.get('inferred') else 'tested'} on 8 GB: up to {best:,} tokens{N}" if best else ""
+            here = {k.split("|", 1)[1]: r for k, r in tuned.items() if k.split("|", 1)[0] == m["name"]}
+            if here:   # this machine's own numbers win (the MTP-off / images-CPU setting first)
+                k0 = "mtp=off,images=cpu" if "mtp=off,images=cpu" in here else sorted(here)[0]
+                r0 = here[k0]; sp = r0.get("speed") or {}; ds = sorted(sp, key=lambda x: int(x))
+                wr = f", writing {sp[ds[0]].get('writing')}-{sp[ds[-1]].get('writing')} t/s" if ds else ""
+                tag = (f"  {D}measured here: up to {r0.get('suggested', 0):,} tokens{wr}"
+                       + (f" (+{len(here) - 1} more setting{'s' if len(here) > 2 else ''})" if len(here) > 1 else "") + f"{N}")
             print(f"  {i:2d}) {m['name']}  {D}{gb(m['size'])}  {m['repo']}{N}{tag}")
-        print(f"   d) download a model    f) add a folder to search    q) quit")
+        print(f"   d) download a model    f) add a folder to search    r) measurements on this machine    q) quit")
         v = ask("Model").lower()
         if v == "q": sys.exit(0)
+        if v == "r":
+            print(f"\n{B}Measured on this machine{N} (llm-tune):"); print("\n".join(results_table(tuned))); continue
         if v == "d": download(st); continue
         if v == "f":
             add_dir(st, ask("Folder with .gguf files"))
@@ -539,11 +550,48 @@ def pick_model(st):
         if v.isdigit() and 1 <= int(v) <= len(models): return models[int(v) - 1]
 
 
-def tuned_for(key):
-    """This machine's own measurement (llm-tune.py) for a model + settings, or None."""
+def load_tuned():
+    """This machine's own measurements (llm-tune.py): {"<model file>|mtp=..,images=..": record}."""
     try:
-        with open(os.path.join(STATE_DIR, "tuned.json")) as f: return json.load(f).get(key)
-    except (OSError, ValueError): return None
+        with open(os.path.join(STATE_DIR, "tuned.json")) as f: return json.load(f)
+    except (OSError, ValueError): return {}
+
+
+def tuned_for(key):
+    return load_tuned().get(key)
+
+
+def setting_label(key):
+    """'mtp=off,images=cpu' -> 'MTP off, images CPU'"""
+    kv = dict(x.split("=") for x in key.split(","))
+    return f"MTP {kv.get('mtp', 'off')}, images {kv.get('images', 'cpu').upper()}"
+
+
+def kshort(n):
+    return f"{n // 1000}k" if n >= 1000 else str(n)
+
+
+def speed_lines(rec, indent="   "):
+    """The depth / reading / writing table of one measurement."""
+    sp = rec.get("speed") or {}
+    out = [f"{indent}{'depth':>9}   {'reading':>8}   {'writing':>8}   (tokens per second)"]
+    for d in sorted(sp, key=lambda x: int(x)):
+        out.append(f"{indent}{int(d):>9,}   {sp[d].get('reading', 0):>8,}   {sp[d].get('writing', 0):>8}")
+    return out
+
+
+def results_table(tuned=None):
+    """Every measurement saved on this machine, one line each."""
+    tuned = load_tuned() if tuned is None else tuned
+    if not tuned: return ["   none yet: run llm-tune to measure a model on this machine"]
+    rows = [("model", "setting", "held", "suggested", "reading / writing at each depth (t/s)", "measured")]
+    for k in sorted(tuned):
+        name, setting = k.split("|", 1); r = tuned[k]; sp = r.get("speed") or {}
+        w = "  ".join(f"{kshort(int(d))}: {sp[d].get('reading')}/{sp[d].get('writing')}" for d in sorted(sp, key=lambda x: int(x)))
+        rows.append((name.replace(".gguf", ""), setting_label(setting), f"{r.get('max_ctx', 0):,}", f"{r.get('suggested', 0):,}", w or "-", r.get("measured", "")))
+    wid = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
+    line = lambda r: "   " + "  ".join(str(c).ljust(wid[i]) for i, c in enumerate(r))
+    return [line(rows[0]), "   " + "  ".join("-" * w for w in wid)] + [line(r) for r in rows[1:]]
 
 
 def choose(st, model, ask_ctx=True):
@@ -593,7 +641,8 @@ def choose(st, model, ask_ctx=True):
     print(f"\n{B}Context{N} (how many tokens the model can keep in view at once).")
     if mine:
         suggested = mine["suggested"]
-        print(f"   Measured on this machine (llm-tune, {mine.get('measured', '')}): {suggested:,}")
+        print(f"   Measured on this machine (llm-tune, {mine.get('measured', '')}): held {mine.get('max_ctx', 0):,}, suggested {suggested:,}")
+        if mine.get("speed"): print("\n".join(speed_lines(mine, indent="   ")))
     elif suggested and rec.get("inferred"): print(f"   Expected to fit on an 8 GB card (same weights as a tested file, about the same size): {suggested:,}")
     elif suggested: print(f"   Tested to fit on an 8 GB RTX 3070 Laptop with these settings: {suggested:,}")
     else: print("   No tested number for this model: enter one (if it does not fit, the server will say so), or measure it: llm-tune")
@@ -642,6 +691,8 @@ def main():
     try: sys.stdout.reconfigure(line_buffering=True)
     except Exception: pass
     for sg in (signal.SIGHUP, signal.SIGTERM): signal.signal(sg, _on_signal)
+    if "--results" in sys.argv:
+        print(f"{B}Measured on this machine{N} (llm-tune):"); print("\n".join(results_table())); return 0
     if "--inventory" in sys.argv:
         return inventory(load_state())
     if "--add-dir" in sys.argv:
