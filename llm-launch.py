@@ -535,7 +535,7 @@ def pick_model(st):
                 k0 = "mtp=off,images=cpu" if "mtp=off,images=cpu" in here else sorted(here)[0]
                 r0 = here[k0]; sp = r0.get("speed") or {}; ds = sorted(sp, key=lambda x: int(x))
                 wr = f", writing {sp[ds[0]].get('writing')}-{sp[ds[-1]].get('writing')} t/s" if ds else ""
-                tag = (f"  {D}measured here: up to {r0.get('suggested', 0):,} tokens{wr}"
+                tag = (f"  {D}measured here: " + (f"up to {r0.get('suggested', 0):,} tokens{wr}" if r0.get("suggested") else "does not fit")
                        + (f" (+{len(here) - 1} more setting{'s' if len(here) > 2 else ''})" if len(here) > 1 else "") + f"{N}")
             print(f"  {i:2d}) {m['name']}  {D}{gb(m['size'])}  {m['repo']}{N}{tag}")
         print(f"   d) download a model    f) add a folder to search    r) measurements on this machine    q) quit")
@@ -588,6 +588,7 @@ def results_table(tuned=None):
     for k in sorted(tuned):
         name, setting = k.split("|", 1); r = tuned[k]; sp = r.get("speed") or {}
         w = "  ".join(f"{kshort(int(d))}: {sp[d].get('reading')}/{sp[d].get('writing')}" for d in sorted(sp, key=lambda x: int(x)))
+        if not r.get("max_ctx"): w = r.get("note") or "does not fit"
         rows.append((name.replace(".gguf", ""), setting_label(setting), f"{r.get('max_ctx', 0):,}", f"{r.get('suggested', 0):,}", w or "-", r.get("measured", "")))
     wid = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
     line = lambda r: "   " + "  ".join(str(c).ljust(wid[i]) for i, c in enumerate(r))
@@ -639,6 +640,9 @@ def choose(st, model, ask_ctx=True):
     last = st.get("_tried", {}).get(f"{model['name']}|{key}") or mem.get("ctx", {}).get(key)
     native = meta.get("context_length")
     print(f"\n{B}Context{N} (how many tokens the model can keep in view at once).")
+    if mine and not mine.get("suggested"):
+        print(f"   {R}Measured on this machine (llm-tune, {mine.get('measured', '')}): {mine.get('note') or 'it does not fit'}{N}")
+        mine = None
     if mine:
         suggested = mine["suggested"]
         print(f"   Measured on this machine (llm-tune, {mine.get('measured', '')}): held {mine.get('max_ctx', 0):,}, suggested {suggested:,}")

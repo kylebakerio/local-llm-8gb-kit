@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """llm-tune: measure, on THIS machine, how much context a model fits in the GPU and how fast it runs.
 
-    python3 llm-tune.py            (or: llm-tune)
+    python3 llm-tune.py            (or: llm-tune)    every model found, every MTP setting, the ones not measured yet
+    llm-tune --redo                                  measure everything again
+    llm-tune --one                                   pick one model and its settings (MTP, images on the CPU or the GPU)
 
-It asks for a model and its settings the way llm-launch does (MTP, images on the CPU or the GPU), then:
+For each model and setting:
   1. FIT: finds the largest context that loads (by halving the range), fills it to 97% with real text, then sends
      requests at a few depths -- llama.cpp takes a little more memory the first time it meets each kind of request, and a
      context filled to the last megabyte can crash on that later -- stepping down until all of it holds. The suggestion
@@ -186,12 +188,59 @@ def load_tuned():
     except (OSError, ValueError): return {}
 
 
+def save(key, rec):
+    t = load_tuned(); t[key] = rec
+    os.makedirs(L.STATE_DIR, exist_ok=True)
+    with open(TUNED + ".tmp", "w") as f: json.dump(t, f, indent=1)
+    os.replace(TUNED + ".tmp", TUNED)
+    return t
+
+
+def tune_one(server, model, s, setting_key, idx, gname):
+    """Fit, then speed, for one model + setting; saved either way (a model that does not fit is recorded as such)."""
+    meta = L.gguf_meta(model["path"])
+    native = min(int(meta.get("context_length") or 262144), 262144)
+    logdir = os.path.join(L.LOG_DIR, "tune-" + time.strftime("%Y%m%d-%H%M%S")); os.makedirs(logdir, exist_ok=True)
+    label = L.setting_label(setting_key)
+    print(f"\n{B}{model['name']}{N}  ({label})")
+    print(f"{B}Fit{N}: the largest context, searching 4,096 - {native:,}")
+    t0 = time.time()
+    held, sug, note = fit(server, model, s, idx, native, logdir)
+    rec = {"max_ctx": held or 0, "suggested": sug or 0, "speed": None, "gpu": gname, "measured": time.strftime("%Y-%m-%d %H:%M")}
+    if not held:
+        print(f"{R}   {note}{N}  (logs: {logdir})")
+        rec.update(note=note, minutes=round((time.time() - t0) / 60, 1))
+        save(f"{model['name']}|{setting_key}", rec); return rec
+    print(f"   {B}held: {held:,} tokens; suggested: {sug:,}{N}  {D}{note}{N}")
+    print(f"{B}Speed{N} at {sug:,} tokens of context:")
+    rec["speed"] = speed(server, model, s, sug, logdir)
+    rec["minutes"] = round((time.time() - t0) / 60, 1)
+    save(f"{model['name']}|{setting_key}", rec)
+    print(f"{B}Result{N} ({rec['minutes']} min): held {held:,}, suggested {sug:,} (llm-launch suggests this from now on)")
+    if rec["speed"]: print("\n".join(L.speed_lines(rec, indent="   ")))
+    return rec
+
+
+def settings_for(model):
+    """Every setting worth measuring, without questions: MTP off, plus MTP on when the file has the head; images on the
+    CPU (the projector loaded there when it is next to the model)."""
+    meta = L.gguf_meta(model["path"])
+    proj = L.projector_for(model)
+    draft_n = next((n for k, n in L.DRAFT_N.items() if model["name"].startswith(k)), 2)
+    out = []
+    for mtp in ([False, True] if meta.get("nextn_predict_layers") else [False]):
+        out.append(({"mtp": mtp, "draft_n": draft_n, "proj": proj, "proj_gpu": False},
+                    f"mtp={'on' if mtp else 'off'},images=cpu"))
+    return out
+
+
 def main():
     try: sys.stdout.reconfigure(line_buffering=True)
     except Exception: pass
     def bye(*_):
         stop(); print(); sys.exit(130)
     signal.signal(signal.SIGINT, bye); signal.signal(signal.SIGTERM, bye)
+    redo = "--redo" in sys.argv
     st = L.load_state()
     server = L.find_server(st)
     idx, gname, total = gpu_index()
@@ -203,36 +252,34 @@ def main():
         if not L.yes("Measure anyway?", default=False): return 1
     if not L.port_free(PORT):
         sys.exit(f"{R}port {PORT} is in use (another llm-tune?){N}")
-    model = L.pick_model(st)
-    c = L.choose(st, model, ask_ctx=False)          # the MTP / images questions
-    meta = L.gguf_meta(model["path"])
-    native = min(int(meta.get("context_length") or 262144), 262144)
-    s = {"mtp": c["mtp"], "draft_n": c["draft_n"], "proj": c["proj"], "proj_gpu": c["proj_gpu"]}
-    logdir = os.path.join(L.LOG_DIR, "tune-" + time.strftime("%Y%m%d-%H%M%S")); os.makedirs(logdir, exist_ok=True)
-    print(f"\n{B}Fit{N}: the largest context for {model['name']} (MTP {'on' if s['mtp'] else 'off'}"
-          + (f", images on the {'GPU' if s['proj_gpu'] else 'CPU'}" if s["proj"] else "") + f"), searching 4,096 - {native:,}")
+    one = "--one" in sys.argv
+    if not one:
+        models = L.scan_models(st)
+        tuned = load_tuned()
+        todo, have = [], []
+        for m in models:
+            for s, k in settings_for(m):
+                (have if (f"{m['name']}|{k}" in tuned and not redo) else todo).append((m, s, k))
+        print(f"\n{B}Every model found{N}: {len(todo)} to measure" + (f", {len(have)} already measured (llm-tune --redo measures them again)" if have else ""))
+        for m, s, k in todo: print(f"   {m['name']}  ({L.setting_label(k)})")
+        if not todo:
+            print("   nothing left to measure"); print("\n".join(L.results_table(tuned))); return 0
+        print(f"   about {len(todo) * 10}-{len(todo) * 25} minutes in all. Leave the laptop plugged in; Ctrl-C stops it (finished ones stay saved).")
+        a = L.ask("Measure all of these (a), or pick one model (p)?", "a").lower()
+        one = a.startswith("p")
+    if one:
+        model = L.pick_model(st)
+        c = L.choose(st, model, ask_ctx=False)          # the MTP / images questions
+        todo = [(model, {"mtp": c["mtp"], "draft_n": c["draft_n"], "proj": c["proj"], "proj_gpu": c["proj_gpu"]}, c["key"])]
     t0 = time.time()
-    held, sug, note = fit(server, model, s, idx, native, logdir)
-    if not held:
-        print(f"{R}   {note}{N}  (logs: {logdir})"); return 1
-    print(f"   {B}held: {held:,} tokens; suggested: {sug:,}{N}  {D}{note}{N}")
-    print(f"\n{B}Speed{N} at {sug:,} tokens of context:")
-    sp = speed(server, model, s, sug, logdir)
-    key = f"{model['name']}|{c['key']}"
-    rec = {"max_ctx": held, "suggested": sug, "speed": sp, "gpu": gname, "measured": time.strftime("%Y-%m-%d %H:%M"),
-           "minutes": round((time.time() - t0) / 60, 1)}
-    t = load_tuned(); t[key] = rec
-    os.makedirs(L.STATE_DIR, exist_ok=True)
-    with open(TUNED + ".tmp", "w") as f: json.dump(t, f, indent=1)
-    os.replace(TUNED + ".tmp", TUNED)
-    setting = L.setting_label(c["key"])
-    print(f"\n{B}Result{N} ({rec['minutes']} min): {model['name']}  ({setting})  on {gname}")
-    print(f"   context that held   {held:>9,} tokens")
-    print(f"   suggested           {sug:>9,} tokens   (llm-launch suggests this from now on)")
-    if sp: print("\n".join(L.speed_lines(rec, indent="   ")))
-    print(f"\n{B}All measurements on this machine{N}  (also: llm-launch --results, or r at its model menu)")
-    print("\n".join(L.results_table(t)))
-    print(f"{D}Saved in {TUNED}   logs: {logdir}{N}")
+    for n, (m, s, k) in enumerate(todo, 1):
+        if len(todo) > 1: print(f"\n{D}[{n} of {len(todo)}]{N}", end="")
+        try: tune_one(server, m, s, k, idx, gname)
+        except Exception as e:
+            stop(); print(f"{R}   {m['name']} ({L.setting_label(k)}) stopped with an error: {e}{N}")
+    print(f"\n{B}All measurements on this machine{N}  ({round((time.time() - t0) / 60)} min this run; also: llm-launch --results, or r at its model menu)")
+    print("\n".join(L.results_table()))
+    print(f"{D}Saved in {TUNED}{N}")
     return 0
 
 

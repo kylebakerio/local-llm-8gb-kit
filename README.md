@@ -127,14 +127,18 @@ At the end it prints a table of this run and of every measurement on this machin
 - shows the whole table on demand: `r` at its model menu, or `llm-launch --results`.
 
 ```bash
-llm-tune
+llm-tune            # every model found: MTP off, and on when the file has it; skips what is already measured
+llm-tune --redo     # measure everything again
+llm-tune --one      # pick one model and its settings (MTP, images on the CPU or the GPU)
 ```
+
+It lists what it will measure and roughly how long that takes, asks once, then runs on its own. A model that does not fit at all is recorded as such.
 
 **Before you run it:**
 - Close other programs that use the GPU. `nvidia-smi` lists them.
 - Keep the desktop on the Intel graphics.
 
-A run takes roughly 10 to 25 minutes per model and setting, mostly reading long prompts. `Ctrl-C` stops it, and the model server with it.
+It takes roughly 10 to 25 minutes per model and setting, mostly reading long prompts, so measuring everything can take an hour or two. Keep the laptop plugged in. `Ctrl-C` stops it, and the model server with it; finished measurements stay saved.
 
 Results are saved in `~/.config/llm-launch/tuned.json`, and logs in `~/.cache/llm-launch/`.
 
