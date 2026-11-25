@@ -5,6 +5,8 @@
 # sha256. Nothing here needs sudo; the two things that do (the NVIDIA driver, the graphics mode) are only suggested.
 set -uo pipefail
 KIT=$(cd "$(dirname "$0")" && pwd)
+START_DIR=$PWD
+REBOOT=0
 B=$(tput bold 2>/dev/null || true); N=$(tput sgr0 2>/dev/null || true)
 say() { printf '\n%s%s%s\n' "$B" "$*" "$N"; }
 ask() { local a; read -r -p "$1 [Y/n] " a; [[ -z "$a" || "$a" =~ ^[Yy] ]]; }
@@ -25,8 +27,14 @@ echo "   $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head
 if command -v system76-power >/dev/null; then
     mode=$(system76-power graphics 2>/dev/null || true); echo "   graphics mode: ${mode:-unknown}"
     if [ "$mode" = nvidia ]; then
-        echo "   The desktop is on the NVIDIA card. To leave all 8 GB to the model, switch to the Intel graphics:"
-        echo "       system76-power graphics hybrid      (then reboot)"
+        echo "   The desktop is on the NVIDIA card, which takes some of its 8 GB from the model."
+        if ask "   Switch the desktop to the Intel graphics (Hybrid mode)? It takes effect after a reboot."; then
+            if system76-power graphics hybrid || sudo system76-power graphics hybrid; then
+                REBOOT=1; echo "   switched: reboot when this script is done"
+            else
+                echo "   could not switch; choose Graphics: Hybrid in the top-bar menu instead"
+            fi
+        fi
     fi
 fi
 [ "${used:-0}" -gt 300 ] && echo "   Note: ${used} MiB of GPU memory is already in use; the tested contexts assume almost none (close apps on the NVIDIA GPU)."
@@ -47,14 +55,14 @@ else
 fi
 
 say "3. opencode 1.18.34 (the version the plugins were tested with)"
-have=$(command -v opencode >/dev/null && opencode --version 2>/dev/null || true)
+OC=$(command -v opencode || echo "$HOME/.opencode/bin/opencode")
+have=$([ -x "$OC" ] && "$OC" --version 2>/dev/null || true)
 if [ "$have" = "1.18.34" ]; then
     echo "   already installed"
 else
     [ -n "$have" ] && echo "   found opencode $have"
     if ask "   Install opencode 1.18.34?"; then
         curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.34
-        echo "   (open a new terminal afterwards so 'opencode' is on your PATH)"
     fi
 fi
 
@@ -81,5 +89,23 @@ else
 fi
 echo "   (more models: run the launcher and choose d)"
 
-say "Done. To start:"
-echo "   cd ~/path/to/your/project && python3 $KIT/llm-launch.py"
+say "6. The llm-launch command"
+mkdir -p "$HOME/.local/bin"
+printf '#!/usr/bin/env bash\nexec python3 "%s/llm-launch.py" "$@"\n' "$KIT" > "$HOME/.local/bin/llm-launch"
+chmod +x "$HOME/.local/bin/llm-launch"
+echo "   From now on, run  llm-launch  in any project folder (in a new terminal; it lives in ~/.local/bin)."
+
+say "Done."
+if [ "$REBOOT" = 1 ]; then
+    echo "   Reboot now so the desktop moves to the Intel graphics, then run  llm-launch  in your project folder."
+    exit 0
+fi
+if ask "   Start the launcher now?"; then
+    def=$START_DIR; [ "$def" = "$KIT" ] && def=$HOME
+    read -r -p "   Project folder for opencode to work in [$def]: " proj
+    proj=${proj:-$def}; proj=${proj/#\~/$HOME}
+    if [ -d "$proj" ]; then
+        cd "$proj" && PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" exec python3 "$KIT/llm-launch.py"
+    fi
+    echo "   no folder $proj: run  llm-launch  from your project folder"
+fi

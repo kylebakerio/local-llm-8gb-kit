@@ -222,6 +222,12 @@ def find_server(st):
         print(f"{R}No runnable llama-server at {p}{N}")
 
 
+def opencode_bin():
+    """opencode on PATH, else where its installer puts it (a terminal opened before the install has no PATH entry yet)."""
+    p = shutil.which("opencode") or os.path.join(HOME, ".opencode", "bin", "opencode")
+    return p if os.path.isfile(p) and os.access(p, os.X_OK) else None
+
+
 def port_free(port):
     with socket.socket() as s:
         try: s.bind(("127.0.0.1", port)); return True
@@ -494,6 +500,10 @@ def choose(st, model):
     has_mtp = bool(meta.get("nextn_predict_layers"))
     mem = st.setdefault("models", {}).setdefault(model["name"], {})
     mtp = False
+    if not has_mtp:
+        other = model["name"].replace(".gguf", "-mtp.gguf") if model["name"].startswith("Ternary-Bonsai-2.5-27B-PTQ1_0.gguf") else None
+        print(f"\n{B}MTP{N} (a draft head that speeds up writing): this file has none, so it runs without it."
+              + (f"\n   {D}{other} has one: choose d at the model menu to get it.{N}" if other else ""))
     if has_mtp:
         print(f"\n{B}MTP{N} (a built-in draft head that makes generation faster).")
         print("   Turning MTP off leaves more room for context, at the cost of running slower.")
@@ -560,7 +570,7 @@ def attach(port):
     prov = update_opencode_config(mid, f"{name} ({ctx // 1000}k)", ctx, port)
     env = dict(os.environ, OPENCODE_CONFIG_CONTENT=session_config(prov))
     print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}\n")
-    return subprocess.call(["opencode", "-m", f"{PROVIDER}/{mid}"], env=env)
+    return subprocess.call([opencode_bin(), "-m", f"{PROVIDER}/{mid}"], env=env)
 
 
 def main():
@@ -577,14 +587,14 @@ def main():
         print(f"   plugins ready in {STATE_DIR}" if td else f"{R}   task-driver plugin missing{N}")
         return 0 if td else 1
     if "--attach" in sys.argv:
-        if not shutil.which("opencode"): print(f"{R}opencode is not on your PATH (see README.md).{N}"); return 1
+        if not opencode_bin(): print(f"{R}opencode is not installed (bash setup.sh installs it).{N}"); return 1
         port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else DEFAULT_PORT
         return attach(port)
     st = load_state()
     st.pop("_tried", None)
     server = find_server(st)
-    if not shutil.which("opencode"):
-        print(f"{R}opencode is not on your PATH (see README.md).{N}"); sys.exit(1)
+    if not opencode_bin():
+        print(f"{R}opencode is not installed (bash setup.sh installs it).{N}"); sys.exit(1)
     model = pick_model(st)
     while True:
         c = choose(st, model)
@@ -613,7 +623,7 @@ def main():
         print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}  {D}(server log: {log}){N}\n")
         time.sleep(1)
         try:
-            rc = subprocess.call(["opencode", "-m", f"{PROVIDER}/{mid}"], env=env)
+            rc = subprocess.call([opencode_bin(), "-m", f"{PROVIDER}/{mid}"], env=env)
         except KeyboardInterrupt:
             rc = 130
         died = p.poll() is not None

@@ -87,15 +87,21 @@ hf download prism-ml/Ternary-Bonsai-2.5-27B-GGUF Ternary-Bonsai-2.5-27B-PTQ1_0.g
 
 ## Every time
 
+At the end, `setup.sh` offers to start the launcher. After that, open a terminal in your project folder and run:
+
 ```bash
-cd ~/path/to/your/project
-python3 ~/local-llm-8gb-kit/llm-launch.py
+llm-launch
 ```
+
+Setup puts that command in `~/.local/bin`; in a terminal opened before setup, use `python3 ~/local-llm-8gb-kit/llm-launch.py`.
 
 It asks, in order:
 1. **Model:** pick one from the list.
-2. **MTP**, only if the model has the head: it is faster, but leaves less room for context.
-3. **Images**, only if the model has an image file next to it. On the CPU (recommended) they cost no GPU memory. On the GPU, images are read faster, but there is less context.
+2. **MTP:** a draft head that makes writing faster but leaves less room for context.
+   - It is asked only for model files that contain one: Bonsai 2.5's `-mtp` file, Bonsai 2 9B's `PQ2_0-MTP` file, and Ornith 1.5 9B.
+   - For any other file it says there is none and runs without it.
+   - On 8 GB, MTP halves Bonsai 2.5's context but costs Bonsai 2 9B nothing. The launcher's default follows that.
+3. **Images:** asked only if the model has an image file next to it. On the CPU (recommended) they cost no GPU memory. On the GPU, images are read faster, but there is less context.
 4. **Context:**
    - It suggests the tested maximum for the model and settings.
    - For a model it has no number for, you type one.
