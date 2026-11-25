@@ -2,6 +2,7 @@
 """llm-launch: run a local model on an 8 GB NVIDIA laptop GPU and open opencode on it.
 
     python3 llm-launch.py            (run it from the project folder you want opencode to work in)
+    python3 llm-launch.py --fetch-plugins  download the task-driver plugin (setup.sh does this; so does the first launch)
     python3 llm-launch.py --attach [--port 8080]
                                      a model server is already running (e.g. started from LL-Dash): just open opencode on
                                      it, with the same opencode setup
@@ -15,8 +16,11 @@ It asks, in order:
 then it adds the model to your opencode config, starts llama-server, and starts opencode pointed at it. When you leave
 opencode, it stops the server.
 
-Settings that match the tested setup: q4_0 K/V cache, all layers on the GPU, flash attention, one request at a time,
-the compaction-anchor plugin (keeps the task in view when a long session is summarized) and a short system prompt.
+Server settings that match the tested setup: q4_0 K/V cache, all layers on the GPU, flash attention, one request at a
+time, the model's own recommended sampling. opencode gets two plugins for these sessions: the task driver
+(opencode-task-driver 0.3.1, focus mode: splits a request with several problems into tasks and works them one at a time,
+each on a clean slate) and the "slim" part of the compaction-anchor plugin (a short system prompt in place of opencode's
+long one, shorter tool descriptions; your project's AGENTS.md is kept).
 Files it writes: ~/.config/llm-launch/ (your choices, the plugin), ~/.cache/llm-launch/ (server logs), and the model
 entry in ~/.config/opencode/opencode.json (a backup is kept next to it the first time).
 Python 3.8+, standard library only.
@@ -27,6 +31,11 @@ HOME = os.path.expanduser("~")
 STATE_DIR = os.path.join(HOME, ".config", "llm-launch")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 PLUGIN_FILE = os.path.join(STATE_DIR, "compaction-anchor.js")
+# the task driver, published at github.com/kylebakerio/opencode-task-driver (release v0.3.1), checked by its sha256
+TD_VERSION = "0.3.1"
+TD_URL = f"https://github.com/kylebakerio/opencode-task-driver/releases/download/v{TD_VERSION}/opencode-task-driver.js"
+TD_SHA256 = "07e7c273a4bc389a04b348f1f03ca1873859da98e2b9246a4fd4c880272f64eb"
+TD_FILE = os.path.join(STATE_DIR, f"opencode-task-driver-{TD_VERSION}.js")
 LOG_DIR = os.path.join(HOME, ".cache", "llm-launch")
 OC_CONFIG = os.path.join(HOME, ".config", "opencode", "opencode.json")
 PROVIDER = "llama-local"
@@ -183,7 +192,7 @@ def find_server(st):
              os.path.join(HOME, "llama-prism", "llama-server"), os.path.join(HOME, "llama-prism", "bin", "llama-server")]
     for c in cands:
         if c and os.path.isfile(c) and os.access(c, os.X_OK): return c
-    print(f"\n{B}Where is llama-server?{N} (the PrismML llama.cpp build: see SETUP.md)")
+    print(f"\n{B}Where is llama-server?{N} (the PrismML llama.cpp build: see README.md)")
     while True:
         p = os.path.expanduser(ask("Path to llama-server"))
         if os.path.isdir(p): p = os.path.join(p, "llama-server")
@@ -268,13 +277,13 @@ def explain_failure(log, mtp, proj, proj_gpu):
     oom = "out of memory" in text or "failed to allocate" in text or "cudamalloc" in text
     if "unknown" in text and ("type" in text or "architecture" in text):
         print(f"{B}This model's file type is not known to this llama-server.{N} Ternary Bonsai PTQ1_0 / PQ2_0 files need the PrismML\n"
-              f"llama.cpp build (SETUP.md), and a model newer than the build may need a newer one.\n")
+              f"llama.cpp build (README.md), and a model newer than the build may need a newer one.\n")
     print(f"{B}If it did not fit in the GPU's memory{N}" + (" (it says out of memory above)" if oom else "") + ", you can:")
     print("   a) use a smaller context")
     if mtp: print("   b) turn MTP off (it needs its own memory on the GPU)")
     if proj and proj_gpu: print("   c) process images on the CPU instead of the GPU")
     print("   - and check nothing else is using the GPU: run  nvidia-smi  (the desktop should be on the Intel graphics,\n"
-          "     see SETUP.md)")
+          "     see README.md)")
 
 
 # ------------------------------------------------------------------ opencode
@@ -310,15 +319,40 @@ def update_opencode_config(mid, label, ctx, port):
     return prov
 
 
+def fetch_task_driver(quiet=False):
+    """The task-driver plugin file, downloaded once from its GitHub release and checked against TD_SHA256. None if it
+    cannot be had (no network): the session then runs without it, and says so."""
+    import hashlib
+    def ok(path):
+        try:
+            with open(path, "rb") as f: return hashlib.sha256(f.read()).hexdigest() == TD_SHA256
+        except OSError: return False
+    if ok(TD_FILE): return TD_FILE
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = TD_FILE + ".part"
+    try:
+        if not quiet: print(f"   downloading the task-driver plugin {TD_VERSION} from GitHub ...")
+        with urllib.request.urlopen(TD_URL, timeout=60) as r, open(tmp, "wb") as fh: fh.write(r.read())
+        if not ok(tmp):
+            os.remove(tmp); print(f"{R}   the downloaded task-driver plugin does not match its checksum; not used{N}"); return None
+        os.replace(tmp, TD_FILE); return TD_FILE
+    except Exception as e:
+        print(f"{R}   could not download the task-driver plugin ({e}); this session runs without it{N}")
+        return None
+
+
 def session_config(prov):
-    """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the compaction-
-    anchor plugin, whose "slim" part also swaps opencode's long built-in instructions for a short prompt (your project's
-    AGENTS.md is kept) and shortens the longest tool descriptions; the skill tool off; the compaction reserve used in the
-    tests; and the model entry (in case opencode.json could not be edited)."""
+    """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the task driver
+    (focus mode) and the compaction-anchor plugin's "slim" part (opencode's long built-in instructions swapped for a
+    short prompt -- your project's AGENTS.md is kept -- and the longest tool descriptions shortened); the skill tool off;
+    the compaction reserve used in the tests; and the model entry (in case opencode.json could not be edited)."""
     write_plugin()
+    plugins = [["file://" + PLUGIN_FILE, {"parts": ["slim"]}]]
+    td = fetch_task_driver()
+    if td: plugins.append(["file://" + td, {"mode": "focus"}])
     return json.dumps({
         "provider": {PROVIDER: prov},
-        "plugin": [["file://" + PLUGIN_FILE, {"parts": ["checklist", "reinsert", "slim"]}]],
+        "plugin": plugins,
         "tools": {"skill": False},
         "compaction": {"reserved": RESERVE},
     })
@@ -468,15 +502,19 @@ def main():
     try: sys.stdout.reconfigure(line_buffering=True)
     except Exception: pass
     for sg in (signal.SIGHUP, signal.SIGTERM): signal.signal(sg, _on_signal)
+    if "--fetch-plugins" in sys.argv:
+        write_plugin(); td = fetch_task_driver()
+        print(f"   plugins ready in {STATE_DIR}" if td else f"{R}   task-driver plugin missing{N}")
+        return 0 if td else 1
     if "--attach" in sys.argv:
-        if not shutil.which("opencode"): print(f"{R}opencode is not on your PATH (see SETUP.md).{N}"); return 1
+        if not shutil.which("opencode"): print(f"{R}opencode is not on your PATH (see README.md).{N}"); return 1
         port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else DEFAULT_PORT
         return attach(port)
     st = load_state()
     st.pop("_tried", None)
     server = find_server(st)
     if not shutil.which("opencode"):
-        print(f"{R}opencode is not on your PATH (see SETUP.md).{N}"); sys.exit(1)
+        print(f"{R}opencode is not on your PATH (see README.md).{N}"); sys.exit(1)
     model = pick_model(st)
     while True:
         c = choose(st, model)
