@@ -62,14 +62,34 @@ say "4. opencode plugins (task driver 0.3.1 from GitHub, and the compaction-anch
 python3 "$KIT/llm-launch.py" --fetch-plugins || echo "   could not get the task-driver plugin now; llm-launch.py tries again at each start"
 
 say "5. A model"
+# a Bonsai 2.5 27B you already have, wherever it is (Hugging Face cache, ~/models, ~/Downloads, LM Studio ...)
+mapfile -t have < <(find "$HOME" -maxdepth 7 \( -path "$HOME/.local/share/Trash" -o -path "$HOME/snap" \) -prune -o \
+    -iname 'Ternary-Bonsai-2.5-27B*.gguf' ! -iname '*mmproj*' -print 2>/dev/null | sort)
+ptq=""
+for f in "${have[@]}"; do
+    echo "   found: $f"
+    case "$(basename "$f")" in Ternary-Bonsai-2.5-27B-PTQ1_0*.gguf) [ -z "$ptq" ] && ptq=$f ;; esac
+    python3 "$KIT/llm-launch.py" --add-dir "$(dirname "$f")" >/dev/null 2>&1 || true   # the launcher looks there too
+done
 M=$HOME/models/prism-ml__Ternary-Bonsai-2.5-27B-GGUF
-if [ -f "$M/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf" ]; then
-    echo "   Bonsai 2.5 27B is already in $M"
-elif ask "   Download Ternary Bonsai 2.5 27B (6.0 GB, plus its 0.6 GB image file) into ~/models?"; then
-    mkdir -p "$M"; R=https://huggingface.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF/resolve/main
-    fetch "$R/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf" "$M/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf" 929560ec9d37cf3cadd4b00cc87b51c570082a628dd830b4692dc0b2ed18dbbe \
-        && fetch "$R/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" "$M/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" 6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903 \
-        || echo "   download failed; run this again to resume"
+R=https://huggingface.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF/resolve/main
+MMSHA=6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903
+if [ -n "$ptq" ]; then
+    echo "   Bonsai 2.5 27B PTQ1_0 is already here: the packing tested for 8 GB. Nothing to download."
+    d=$(dirname "$ptq")
+    if ! ls "$d" 2>/dev/null | grep -qi 'mmproj'; then
+        if ask "   Its image file is not next to it. Download it (0.6 GB) so the model can read images?"; then
+            fetch "$R/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" "$d/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" $MMSHA || echo "   download failed"
+        fi
+    fi
+else
+    [ ${#have[@]} -gt 0 ] && echo "   That packing holds the same weights in more space: on an 8 GB card the PTQ1_0 file (6.0 GB) leaves room for ~88k tokens of context, the others for far less or none."
+    if ask "   Download Ternary Bonsai 2.5 27B PTQ1_0 (6.0 GB, plus its 0.6 GB image file) into ~/models?"; then
+        mkdir -p "$M"
+        fetch "$R/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf" "$M/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf" 929560ec9d37cf3cadd4b00cc87b51c570082a628dd830b4692dc0b2ed18dbbe \
+            && fetch "$R/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" "$M/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" $MMSHA \
+            || echo "   download failed; run this again to resume"
+    fi
 fi
 echo "   (more models: run the launcher and choose d)"
 

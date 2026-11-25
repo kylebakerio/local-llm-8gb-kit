@@ -3,6 +3,7 @@
 
     python3 llm-launch.py            (run it from the project folder you want opencode to work in)
     python3 llm-launch.py --fetch-plugins  download the task-driver plugin (setup.sh does this; so does the first launch)
+    python3 llm-launch.py --add-dir DIR    also look for models in DIR (setup.sh adds the folder of a model you already have)
     python3 llm-launch.py --attach [--port 8080]
                                      a model server is already running (e.g. started from LL-Dash): just open opencode on
                                      it, with the same opencode setup
@@ -151,6 +152,14 @@ def gguf_meta(path, want=("nextn_predict_layers", "context_length", "general.arc
 
 
 # ------------------------------------------------------------------ finding models
+# where downloaded models usually are, besides the Hugging Face cache (LM Studio's folders included)
+DEFAULT_DIRS = [os.path.join(HOME, "models"), os.path.join(HOME, "Downloads"), os.path.join(HOME, ".lmstudio", "models"),
+                os.path.join(HOME, ".cache", "lm-studio", "models")]
+# packings of the tested models that hold the same weights in more space: on 8 GB they leave little or no room for context
+BIGGER_PACKS = {"Ternary-Bonsai-2.5-27B-PQ2_0": "7.3 GB", "Ternary-Bonsai-2.5-27B-Q2_0": "7.7 GB",
+                "Ternary-Bonsai-2-27B-PQ2_0": "7.2 GB", "Ternary-Bonsai-2-27B-Q2_0": "7.6 GB"}
+
+
 def hf_cache():
     if os.environ.get("HF_HUB_CACHE"): return os.environ["HF_HUB_CACHE"]
     return os.path.join(os.environ.get("HF_HOME") or os.path.join(HOME, ".cache", "huggingface"), "hub")
@@ -172,9 +181,12 @@ def scan_models(st):
         snaps = sorted(glob.glob(os.path.join(repo_dir, "snapshots", "*")), key=os.path.getmtime, reverse=True)
         for s in snaps:
             for p in glob.glob(os.path.join(s, "**", "*.gguf"), recursive=True): add(p, repo)
-    for d in st.get("model_dirs", [os.path.join(HOME, "models")]):
+    for d in list(DEFAULT_DIRS) + [x for x in st.get("model_dirs", []) if x not in DEFAULT_DIRS]:
         d = os.path.expanduser(d)
-        for p in glob.glob(os.path.join(d, "**", "*.gguf"), recursive=True): add(p, os.path.relpath(os.path.dirname(p), d))
+        if not os.path.isdir(d): continue
+        for p in glob.glob(os.path.join(d, "**", "*.gguf"), recursive=True):
+            rel = os.path.relpath(os.path.dirname(p), d)
+            add(p, (d.replace(HOME, "~", 1) if rel == "." else os.path.join(d.replace(HOME, "~", 1), rel)))
     return sorted(found.values(), key=lambda m: m["name"].lower())
 
 
@@ -400,10 +412,18 @@ def download(st):
 
 
 # ------------------------------------------------------------------ the session
+def add_dir(st, d):
+    d = os.path.abspath(os.path.expanduser(d))
+    if not os.path.isdir(d): print(f"{R}   no folder {d}{N}"); return False
+    dirs = st.setdefault("model_dirs", [])
+    if d not in dirs: dirs.append(d); save_state(st)
+    return True
+
+
 def pick_model(st):
     while True:
         models = scan_models(st)
-        print(f"\n{B}Models{N}  {D}(Hugging Face downloads in {hf_cache()} and ~/models){N}")
+        print(f"\n{B}Models{N}  {D}(Hugging Face downloads, ~/models, ~/Downloads, LM Studio's folders, and folders you added){N}")
         if not models: print("   none found yet")
         for i, m in enumerate(models, 1):
             rec = RECOMMENDED.get(m["name"]) or {}
@@ -415,16 +435,17 @@ def pick_model(st):
         if v == "q": sys.exit(0)
         if v == "d": download(st); continue
         if v == "f":
-            d = os.path.expanduser(ask("Folder with .gguf files"))
-            if os.path.isdir(d):
-                st.setdefault("model_dirs", [os.path.join(HOME, "models")])
-                if d not in st["model_dirs"]: st["model_dirs"].append(d); save_state(st)
+            add_dir(st, ask("Folder with .gguf files"))
             continue
         if v.isdigit() and 1 <= int(v) <= len(models): return models[int(v) - 1]
 
 
 def choose(st, model):
     """MTP, images, context (in that order). Returns a dict, or None to pick another model."""
+    big = next((v for k, v in BIGGER_PACKS.items() if model["name"].startswith(k)), None)
+    if big:
+        print(f"\n{R}Note:{N} this packing is {big}. The PTQ1_0 file holds the same weights in 6.0 GB, which on an 8 GB card leaves")
+        print("   room for about 88,000 tokens of context. With this one there is far less, or none. (Download PTQ1_0: choose d.)")
     meta = gguf_meta(model["path"])
     rec = RECOMMENDED.get(model["name"], {})
     has_mtp = bool(meta.get("nextn_predict_layers"))
@@ -502,6 +523,9 @@ def main():
     try: sys.stdout.reconfigure(line_buffering=True)
     except Exception: pass
     for sg in (signal.SIGHUP, signal.SIGTERM): signal.signal(sg, _on_signal)
+    if "--add-dir" in sys.argv:
+        st = load_state()
+        return 0 if add_dir(st, sys.argv[sys.argv.index("--add-dir") + 1]) else 1
     if "--fetch-plugins" in sys.argv:
         write_plugin(); td = fetch_task_driver()
         print(f"   plugins ready in {STATE_DIR}" if td else f"{R}   task-driver plugin missing{N}")
