@@ -61,7 +61,11 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
 
 To get updates later: `cd ~/local-llm-8gb-kit && git pull`.
 
-**Bonsai 2.5 27B is expected to be the strongest model that fits.** That is PrismML's claim. Our own coding tests on this setup are running now, and this note will be updated with what they show. The `-mtp` file adds a speed-up head. On this card that head costs a lot of context (see the table).
+**Use Bonsai 2.5 27B (the PTQ1_0 file) for real coding work.**
+- In our coding tests on this 8 GB setup, it and Bonsai 2 27B each fixed 11 of 14 real bugs. The 9B models fixed 2 or 3. The details are under *What was measured*.
+- Bonsai 2.5 gets the nod over Bonsai 2 because it can also read images.
+- The 27B models are slow: a typical fix took about 40 minutes, and the longest took 2 hours.
+- The `-mtp` file adds a speed-up head, but on this card that head halves the context (see the table). The coding tests ran with MTP off, and how well the model codes with half the context is untested.
 
 <details><summary>Doing these steps by hand</summary>
 
@@ -201,6 +205,30 @@ The test GPU (an RTX 3060, the same Ampere generation as the 3070 Laptop) was he
 - **Reading** depends mostly on compute, so expect about the same.
 
 **Images.** With the image file loaded on the CPU, Bonsai 2.5 still held 90,112 tokens with no extra GPU memory. Reading a 320×240 image and answering about it took about 3 seconds on the test machine's CPU. Her CPU is older, so expect a little longer, and longer again for bigger images.
+
+### Coding tests
+
+Each model got the same 14 real bugs from four web apps. Hidden tests decided pass or fail, and each bug was described the way a user would report it.
+
+The test conditions:
+- one try per bug, with a 2-hour limit;
+- the GPU held to 8 GB, with MTP off;
+- the context from the table above, and the launcher's slim system prompt.
+
+| Model | Bugs fixed (of 14) | Typical time per bug | Longest |
+|---|---|---|---|
+| Bonsai 2.5 27B | 11 | 38 min | 2 h (the limit) |
+| Bonsai 2 27B | 11 | 38 min | 2 h (the limit) |
+| Ornith 1.5 9B | 3 | 14 min | 1 h 30 min |
+| Bonsai 2 9B | 2 | 3 min | 23 min |
+
+- **The limit:** two of Bonsai 2.5's fixes and one of Bonsai 2's were in place just as the 2-hour limit hit. They count as fixed, since there is no limit in real use.
+- **27B vs 27B:** with one try per bug, a gap of one or two bugs is noise. The two 27B models are equally strong here.
+- **The 9B models:** both are far behind.
+  - Bonsai 2 9B usually finished within minutes with a fix that didn't work.
+  - Ornith often repeated itself without changing anything until it was stopped.
+- **Speed:** each model ran half its bugs on the RTX 3060 and half on an RTX 4090 Laptop, also held to 8 GB. Her card's speed falls between the two.
+- **Plugins:** the tests used an earlier version of the compaction plugin in place of the task driver, and ran the 27B models at 90,112 tokens of context; the launcher suggests 88,064. A test of the launcher's exact plugin setup is running, and this section will be updated with what it shows.
 
 Every model runs with its makers' recommended sampling settings, which the launcher sets itself:
 
