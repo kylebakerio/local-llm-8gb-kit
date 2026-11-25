@@ -539,8 +539,16 @@ def pick_model(st):
         if v.isdigit() and 1 <= int(v) <= len(models): return models[int(v) - 1]
 
 
-def choose(st, model):
-    """MTP, images, context (in that order). Returns a dict, or None to pick another model."""
+def tuned_for(key):
+    """This machine's own measurement (llm-tune.py) for a model + settings, or None."""
+    try:
+        with open(os.path.join(STATE_DIR, "tuned.json")) as f: return json.load(f).get(key)
+    except (OSError, ValueError): return None
+
+
+def choose(st, model, ask_ctx=True):
+    """MTP, images, context (in that order). Returns a dict, or None to pick another model. ask_ctx=False (llm-tune):
+    stop after MTP / images."""
     big = next((v for k, v in BIGGER_PACKS.items() if model["name"].startswith(k)), None)
     if big:
         print(f"\n{R}Note:{N} this packing is {big}. The PTQ1_0 file holds the same weights in 6.0 GB, which on an 8 GB card leaves")
@@ -572,6 +580,10 @@ def choose(st, model):
         print("   on the GPU, images are read faster but there is less room for context.")
         proj_gpu = not yes("Process images on the CPU?", default=not mem.get("images_gpu", False))
     key = f"mtp={'on' if mtp else 'off'},images={'gpu' if (proj and proj_gpu) else 'cpu'}"
+    draft_n = next((n for k, n in DRAFT_N.items() if model["name"].startswith(k)), 2)
+    if not ask_ctx:
+        return {"mtp": mtp, "proj": proj, "proj_gpu": proj_gpu, "ctx": None, "key": key, "draft_n": draft_n}
+    mine = tuned_for(f"{model['name']}|{key}")
     suggested = rec.get("mtp_on" if mtp else "mtp_off")
     if suggested and proj and proj_gpu and rec.get("mib_per_1k"):
         mib = os.path.getsize(proj) / 2**20 + 300          # the projector + its working memory
@@ -579,9 +591,12 @@ def choose(st, model):
     last = st.get("_tried", {}).get(f"{model['name']}|{key}") or mem.get("ctx", {}).get(key)
     native = meta.get("context_length")
     print(f"\n{B}Context{N} (how many tokens the model can keep in view at once).")
-    if suggested and rec.get("inferred"): print(f"   Expected to fit on an 8 GB card (same weights as a tested file, about the same size): {suggested:,}")
+    if mine:
+        suggested = mine["suggested"]
+        print(f"   Measured on this machine (llm-tune, {mine.get('measured', '')}): {suggested:,}")
+    elif suggested and rec.get("inferred"): print(f"   Expected to fit on an 8 GB card (same weights as a tested file, about the same size): {suggested:,}")
     elif suggested: print(f"   Tested to fit on an 8 GB RTX 3070 Laptop with these settings: {suggested:,}")
-    else: print("   No tested number for this model: enter one (if it does not fit, the server will say so).")
+    else: print("   No tested number for this model: enter one (if it does not fit, the server will say so), or measure it: llm-tune")
     if last: print(f"   You used {last:,} last time.")
     if native: print(f"   {D}The model's own maximum: {native:,}{N}")
     while True:
@@ -591,8 +606,7 @@ def choose(st, model):
             if native and ctx > native: print(f"   (more than the model's maximum {native:,}; using {native:,})"); ctx = native
             break
         print("   Enter a number of tokens, e.g. 65536 or 64k.")
-    return {"mtp": mtp, "proj": proj, "proj_gpu": proj_gpu, "ctx": ctx, "key": key,
-            "draft_n": next((n for k, n in DRAFT_N.items() if model["name"].startswith(k)), 2)}
+    return {"mtp": mtp, "proj": proj, "proj_gpu": proj_gpu, "ctx": ctx, "key": key, "draft_n": draft_n}
 
 
 RUNNING = [None]          # the server this run started: stopped if the terminal closes or the script is killed

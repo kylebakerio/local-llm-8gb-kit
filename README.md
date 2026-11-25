@@ -114,6 +114,27 @@ If the model server fails to start:
 
 When you quit opencode, it asks whether to stop the server.
 
+## Measure your own card: llm-tune
+
+The contexts the launcher suggests were measured on a test GPU of the same generation as the 3070 Laptop. `llm-tune` measures them on this laptop instead: for any model file, including ones not in the table below, such as a different Ornith quant. With the setting you choose (MTP, images), it finds:
+
+- **the largest context that loads and holds:** it fills the context to 97% with real text, then sends requests at a few depths;
+- **reading and writing speed** at 4k, 32k and near that maximum.
+
+The launcher then suggests the measured context for that model and setting ("Measured on this machine").
+
+```bash
+llm-tune
+```
+
+**Before you run it:**
+- Close other programs that use the GPU. `nvidia-smi` lists them.
+- Keep the desktop on the Intel graphics.
+
+A run takes roughly 10 to 25 minutes per model and setting, mostly reading long prompts. `Ctrl-C` stops it, and the model server with it.
+
+Results are saved in `~/.config/llm-launch/tuned.json`, and logs in `~/.cache/llm-launch/`.
+
 ## Optional: the LL-Dash dashboard
 
 LL-Dash is a web dashboard for starting and stopping models and watching the GPU. It comes with a terminal version, `lldash-cli`.

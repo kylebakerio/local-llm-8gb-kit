@@ -75,10 +75,11 @@ say "5. Your models"
 python3 "$KIT/llm-launch.py" --inventory
 [ $? -eq 0 ] || echo "   No Bonsai 2.5 27B PTQ1_0 file found: that is the one tested for 8 GB. The launcher can get it (choose d)."
 
-say "6. The llm-launch command"
+say "6. The llm-launch and llm-tune commands"
 mkdir -p "$HOME/.local/bin"
 printf '#!/usr/bin/env bash\nexec python3 "%s/llm-launch.py" "$@"\n' "$KIT" > "$HOME/.local/bin/llm-launch"
-chmod +x "$HOME/.local/bin/llm-launch"
+printf '#!/usr/bin/env bash\nexec python3 "%s/llm-tune.py" "$@"\n' "$KIT" > "$HOME/.local/bin/llm-tune"
+chmod +x "$HOME/.local/bin/llm-launch" "$HOME/.local/bin/llm-tune"
 # Pop/Ubuntu add ~/.local/bin to PATH only at login, and only if it existed then: make new terminals see it right away
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) echo "   From now on, run  llm-launch  in any project folder." ;;
