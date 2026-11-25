@@ -51,12 +51,12 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
 - **The opencode plugins:**
   - [opencode-task-driver](https://github.com/kylebakerio/opencode-task-driver) 0.3.1, from its GitHub release;
   - the "slim" part of the compaction-anchor plugin, which comes built into the launcher.
-- **Your models.** Setup finds the models you already have anywhere in your home folder: the Hugging Face cache, `~/models`, `~/Downloads`, LM Studio's folders and so on.
+- **Your models.** Setup finds the models you already have anywhere in your home folder or on another mounted drive: the Hugging Face cache, `~/models`, `~/Downloads`, LM Studio's folders and so on.
   - It covers Bonsai 2.5 27B, Bonsai 2 27B, Bonsai 2 9B and Ornith 1.5 9B.
   - It says which files were tested and adds their folders to the launcher's search.
-  - It downloads nothing you already have.
+  - It downloads no models. To get one, use the launcher's model menu: choose `d`.
   - You can re-check any time with `python3 llm-launch.py --inventory`.
-  - **For Bonsai 2.5 27B, use the PTQ1_0 file.** That is the 8 GB fit, and the same goes for Bonsai 2 27B. The PQ2_0 and Q2_0 files hold the same weights in 7.3 and 7.7 GB, and leave far less room for context, or none. If you don't have PTQ1_0, setup offers to download it: 6 GB, plus its 0.6 GB image file.
+  - **For Bonsai 2.5 27B, use the PTQ1_0 file.** That is the 8 GB fit, and the same goes for Bonsai 2 27B. The PQ2_0 and Q2_0 files hold the same weights in 7.3 and 7.7 GB, and leave far less room for context, or none. If you don't have PTQ1_0, get it from the launcher: choose `d`. It is 6 GB, plus its 0.6 GB image file.
   - Get more models later from the launcher: choose `d` at its model menu.
 
 To get updates later: `cd ~/local-llm-8gb-kit && git pull`.

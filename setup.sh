@@ -69,25 +69,11 @@ fi
 say "4. opencode plugins (task driver 0.3.1 from GitHub, and the compaction-anchor slim part)"
 python3 "$KIT/llm-launch.py" --fetch-plugins || echo "   could not get the task-driver plugin now; llm-launch.py tries again at each start"
 
-say "5. A model"
-# the models you already have, wherever they are: what is known about each; their folders join the launcher's search path
-python3 "$KIT/llm-launch.py" --inventory; inv=$?
-ptq=""; [ $inv -eq 0 ] && ptq=yes
-M=$HOME/models/prism-ml__Ternary-Bonsai-2.5-27B-GGUF
-R=https://huggingface.co/prism-ml/Ternary-Bonsai-2.5-27B-GGUF/resolve/main
-MMSHA=6807ede61d570bb86ba34b756a0fa109edc33668604de867c6ea6d8f1d631903
-if [ -n "$ptq" ]; then
-    echo "   You have a tested Bonsai 2.5 27B file: nothing to download."
-    echo "   (A model whose line does not say 'image file next to it' cannot read images. Its mmproj file goes in the same folder.)"
-else
-    if ask "   Download Ternary Bonsai 2.5 27B PTQ1_0 (6.0 GB, plus its 0.6 GB image file) into ~/models?"; then
-        mkdir -p "$M"
-        fetch "$R/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf" "$M/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf" 929560ec9d37cf3cadd4b00cc87b51c570082a628dd830b4692dc0b2ed18dbbe \
-            && fetch "$R/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" "$M/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf" $MMSHA \
-            || echo "   download failed; run this again to resume"
-    fi
-fi
-echo "   (more models: run the launcher and choose d)"
+say "5. Your models"
+# what you already have, wherever it is: what is known about each, and their folders join the launcher's search path.
+# Nothing is downloaded here; the launcher's model menu has d for that.
+python3 "$KIT/llm-launch.py" --inventory
+[ $? -eq 0 ] || echo "   No Bonsai 2.5 27B PTQ1_0 file found: that is the one tested for 8 GB. The launcher can get it (choose d)."
 
 say "6. The llm-launch command"
 mkdir -p "$HOME/.local/bin"

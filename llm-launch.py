@@ -436,12 +436,16 @@ def add_dir(st, d):
 
 
 def inventory(st):
-    """Find the models this kit knows about anywhere in the home folder, say what is known about each, and add their
+    """Find the models this kit knows about anywhere in the home folder (and other mounted drives), say what is known about each, and add their
     folders to the launcher's search path. Exit status 0 when a tested Bonsai 2.5 27B file is among them, else 3."""
     skip = {os.path.join(HOME, x) for x in (".local/share/Trash", "snap", ".npm", ".cargo", ".rustup", ".nvm")}
     found = []
-    for root, dirs, files in os.walk(HOME, followlinks=False):
-        if root in skip or root[len(HOME):].count(os.sep) >= 7:
+    user = os.path.basename(HOME)
+    tops = [HOME] + [d for d in (f"/media/{user}", f"/run/media/{user}", "/mnt") if os.path.isdir(d)]   # other drives too
+    walk = (x for top in tops for x in os.walk(top, followlinks=False))
+    for root, dirs, files in walk:
+        top = next(t for t in tops if root == t or root.startswith(t + os.sep))
+        if root in skip or root[len(top):].count(os.sep) >= 7:
             dirs[:] = []; continue
         dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
         for f in files:
