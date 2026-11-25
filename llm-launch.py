@@ -318,6 +318,52 @@ def model_id(name):
     return re.sub(r"[^a-z0-9.]+", "-", re.sub(r"\.gguf$", "", name.lower())).strip("-")
 
 
+def jsonc_loads(text):
+    """JSON with // and /* */ comments and trailing commas (what opencode accepts) -> object; ValueError if broken."""
+    out, i, n, in_str = [], 0, len(text), False
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n: out.append(text[i + 1]); i += 2; continue
+            if c == '"': in_str = False
+            i += 1; continue
+        if c == '"': in_str = True; out.append(c); i += 1; continue
+        if text.startswith("//", i):
+            j = text.find("\n", i); i = n if j < 0 else j; continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2); i = n if j < 0 else j + 2; continue
+        out.append(c); i += 1
+    return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
+
+
+def check_opencode_config():
+    """Before anything is loaded: opencode will not start at all with a broken ~/.config/opencode/opencode.json. Offer to
+    set it aside (kept as a backup) so a fresh one is written. Returns False to stop."""
+    if not os.path.exists(OC_CONFIG): return True
+    text = open(OC_CONFIG, errors="replace").read()
+    try:
+        json.loads(text); return True
+    except ValueError:
+        pass
+    try:
+        jsonc_loads(text); return True        # comments / trailing commas: fine for opencode; this script won't edit it
+    except ValueError as e:
+        err = e
+    line = getattr(err, "lineno", None)
+    print(f"\n{R}{B}Your opencode config has an error, and opencode will not start with it:{N} {OC_CONFIG}")
+    if line:
+        print(f"   line {line}: {text.splitlines()[line - 1].strip() if line <= len(text.splitlines()) else ''}")
+    print(f"   ({err.msg if hasattr(err, 'msg') else err})")
+    if yes("Set it aside (kept as a backup) and let this script write a fresh one?", default=True):
+        bak = OC_CONFIG + time.strftime(".broken-%Y%m%d-%H%M%S")
+        os.replace(OC_CONFIG, bak)
+        print(f"   moved to {bak}; anything you want from it can be copied back by hand")
+        return True
+    print("   Fix that line by hand (or remove the file), then run this again.")
+    return False
+
+
 def update_opencode_config(mid, label, ctx, port):
     """Add / update this model's entry under provider llama-local. A config with comments (JSONC) is not edited: the
     entry is printed for you to paste, and this session gets it anyway (OPENCODE_CONFIG_CONTENT)."""
@@ -327,8 +373,8 @@ def update_opencode_config(mid, label, ctx, port):
     try:
         cfg = json.load(open(OC_CONFIG)) if os.path.exists(OC_CONFIG) else {"$schema": "https://opencode.ai/config.json"}
     except ValueError:
-        print(f"\n{R}{OC_CONFIG} could not be read as plain JSON (comments?), so it was not changed.{N} Add this under \"provider\":")
-        print(json.dumps({PROVIDER: prov}, indent=2))
+        # JSONC (comments): left as it is; this session gets the entry through OPENCODE_CONFIG_CONTENT anyway
+        print(f"   {D}{OC_CONFIG} has comments, so it is left unchanged; this session gets the model entry anyway{N}")
         return prov
     p = cfg.setdefault("provider", {}).setdefault(PROVIDER, {})
     before = json.dumps(cfg, sort_keys=True)
@@ -559,6 +605,7 @@ def _on_signal(signum, _frame):
 
 def attach(port):
     """Open opencode on a llama-server that is already running (LL-Dash started it, or another llm-launch)."""
+    if not check_opencode_config(): return 1
     if not health(port):
         print(f"{R}No model server answering on port {port}.{N} Start one (LL-Dash, or llm-launch without --attach)."); return 1
     try:
@@ -599,6 +646,7 @@ def main():
     server = find_server(st)
     if not opencode_bin():
         print(f"{R}opencode is not installed (bash setup.sh installs it).{N}"); sys.exit(1)
+    if not check_opencode_config(): return 1
     model = pick_model(st)
     while True:
         c = choose(st, model)
