@@ -33,9 +33,14 @@ def sampling_fields(name):
     return fields, rest
 
 
+# short, typeable profile names: <model>[-mtp]-<context in thousands>k, e.g. bonsai2.5-27b-88k (lldash-cli start takes a prefix)
+SLUG = {"Ternary-Bonsai-2.5-27B-PTQ1_0.gguf": "bonsai2.5-27b", "Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf": "bonsai2.5-27b",
+        "Ornith-1.5-9B-Q4_K_M.gguf": "ornith1.5-9b", "Ternary-Bonsai-2-9B-PTQ1_0.gguf": "bonsai2-9b",
+        "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf": "bonsai2-9b", "Ternary-Bonsai-2-27B-PTQ1_0.gguf": "bonsai2-27b"}
+
+
 def nice(name):
-    s = re.sub(r"\.gguf$", "", name)
-    return s.replace("Ternary-Bonsai-", "Bonsai ").replace("-PTQ1_0", " PTQ1_0").replace("-PQ2_0", " PQ2_0").replace("-", " ")
+    return SLUG.get(name) or re.sub(r"[^a-z0-9.]+", "-", re.sub(r"\.gguf$", "", name.lower())).strip("-")
 
 
 def profiles_for(model):
@@ -58,7 +63,7 @@ def profiles_for(model):
             cfg["argString"] += f" --spec-draft-p-min 0 -ctkd {L.KV} -ctvd {L.KV}"
         if proj:
             cfg.update(mmprojPath=proj, mmprojOffload=False)      # images on the CPU (turn Images on in the launcher)
-        label = f"{nice(model['name'])} · {ctx // 1000}k" + (" · MTP" if mtp else "")
+        label = f"{nice(model['name'])}{'-mtp' if mtp else ''}-{ctx // 1000}k"
         out[label] = cfg
     return out
 
@@ -80,9 +85,14 @@ def main():
     doc.setdefault("version", 3); profs = doc.setdefault("profiles", {})
     for k in [k for k, v in profs.items() if (v.get("config") or {}).get("note") == TAG]: del profs[k]
     now = int(time.time() * 1000); made = []
+    chosen = {}
     for m in L.scan_models(L.load_state()):
         for label, c in profiles_for(m).items():
-            profs[label] = {"config": c, "savedAt": now, "lastLoadedAt": None}; made.append((label, m["path"]))
+            # one profile per model and MTP choice: a file with an MTP head run with MTP off is the same as the plain file
+            if label in chosen and "mtp" not in os.path.basename(chosen[label]["modelPath"]).lower(): continue
+            chosen[label] = c
+    for label, c in sorted(chosen.items()):
+        profs[label] = {"config": c, "savedAt": now, "lastLoadedAt": None}; made.append((label, c["modelPath"]))
     tmp = pf + ".tmp"
     with open(tmp, "w") as f: json.dump(doc, f, indent=2)
     os.replace(tmp, pf)

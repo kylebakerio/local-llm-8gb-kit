@@ -122,9 +122,9 @@ The installer:
 | Command | What it does |
 |---|---|
 | `lldash` | Start the dashboard, then open http://127.0.0.1:3000 and launch a model from the left panel |
-| `lldash-cli start bonsai` | Start a profile by part of its name, and wait until it is ready |
+| `lldash-cli start bonsai2.5-27b-88k` | Start a profile by its name, or the start of it if that is unique, and wait until it is ready |
 | `lldash-cli stop` | Stop it |
-| `lldash-cli profile list` | List the launch profiles |
+| `lldash-cli profile list` | List the launch profiles: `<model>[-mtp]-<context>k`, for example `bonsai2.5-27b-88k`, `bonsai2.5-27b-mtp-41k`, `ornith1.5-9b-249k` |
 | `llm-launch --attach` | Open opencode on the model the dashboard is serving, with the same opencode setup as the launcher |
 
 After downloading another tested model, run `python3 ~/local-llm-8gb-kit/make-profiles.py` to add its profile.

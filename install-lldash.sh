@@ -58,7 +58,7 @@ chmod +x "$HOME/.local/bin/lldash" "$HOME/.local/bin/lldash-cli" "$HOME/.local/b
 say "Done."
 cat <<EOF
   lldash                      start the dashboard, then open http://127.0.0.1:3000 (launch models from its left panel)
-  lldash-cli start bonsai     start a profile by (part of) its name and wait until it is ready; lldash-cli stop to stop it
+  lldash-cli start bonsai2.5-27b-88k   start a profile (name or unique start of it), wait until ready; lldash-cli stop
   lldash-cli profile list     the launch profiles
   llm-launch --attach         open opencode on the model the dashboard is serving (same opencode setup as llm-launch)
   llm-launch                  the launcher on its own, no dashboard needed
