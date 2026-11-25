@@ -3,7 +3,9 @@
 
     python3 llm-launch.py            (run it from the project folder you want opencode to work in)
     python3 llm-launch.py --fetch-plugins  download the task-driver plugin (setup.sh does this; so does the first launch)
-    python3 llm-launch.py --add-dir DIR    also look for models in DIR (setup.sh adds the folder of a model you already have)
+    python3 llm-launch.py --add-dir DIR    also look for models in DIR
+    python3 llm-launch.py --inventory      find the models this kit tested anywhere in your home folder, say what is known
+                                           about each, and add their folders to the search path (setup.sh runs this)
     python3 llm-launch.py --attach [--port 8080]
                                      a model server is already running (e.g. started from LL-Dash): just open opencode on
                                      it, with the same opencode setup
@@ -58,7 +60,14 @@ RECOMMENDED = {
     "Ternary-Bonsai-2-9B-PTQ1_0.gguf":         {"mtp_off": 262144, "mib_per_1k": 9.77},                  # the model's own max; 4.6 GB used
     "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf": {"mtp_off": 262144, "mtp_on": 262144, "mib_per_1k": 11.8}, # 5.0 / 5.9 GB used
     "Ternary-Bonsai-2-27B-PTQ1_0.gguf":        {"mtp_off": 88064, "mib_per_1k": 18.55},                  # 90112 held; 93184 crashed later
+    # not measured, inferred: the same Bonsai 2 9B weights, packed between the tested PTQ1_0 (4.6 GB used at 262k) and the
+    # PQ2_0-MTP file (5.0 GB used at 262k with MTP off), so 262k leaves ~3 GB spare on an 8 GB card
+    "Ternary-Bonsai-2-9B-PQ2_0.gguf":          {"mtp_off": 262144, "mib_per_1k": 9.77, "inferred": True},
+    "Ternary-Bonsai-2-9B-Q2_0.gguf":           {"mtp_off": 262144, "mib_per_1k": 9.77, "inferred": True},
 }
+# the files the numbers above were measured with, per model (shown when a different file of that model is found)
+TESTED_FILES = {"Ternary-Bonsai-2.5-27B": "PTQ1_0 (or PTQ1_0-mtp)", "Ternary-Bonsai-2-27B": "PTQ1_0",
+                "Ternary-Bonsai-2-9B": "PTQ1_0 or PQ2_0-MTP-Q8_0", "Ornith-1.5-9B": "Q4_K_M"}
 # Each model's own recommended sampling (thinking mode; Ornith: its "precise coding" set), from the model cards, as
 # llama-server flags. The tests use exactly these. A model not listed gets llama.cpp's defaults plus whatever its GGUF
 # file sets.
@@ -420,6 +429,40 @@ def add_dir(st, d):
     return True
 
 
+def inventory(st):
+    """Find the models this kit knows about anywhere in the home folder, say what is known about each, and add their
+    folders to the launcher's search path. Exit status 0 when a tested Bonsai 2.5 27B file is among them, else 3."""
+    skip = {os.path.join(HOME, x) for x in (".local/share/Trash", "snap", ".npm", ".cargo", ".rustup", ".nvm")}
+    found = []
+    for root, dirs, files in os.walk(HOME, followlinks=False):
+        if root in skip or root[len(HOME):].count(os.sep) >= 7:
+            dirs[:] = []; continue
+        dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
+        for f in files:
+            if f.lower().endswith(".gguf") and "mmproj" not in f.lower() and any(f.startswith(k) for k in TESTED_FILES):
+                if not re.search(r"-(\d{5})-of-\d{5}\.gguf$", f) or "-00001-of-" in f: found.append(os.path.join(root, f))
+    have_b25 = False
+    if not found: print("   none of the models this kit tested were found")
+    for path in sorted(found, key=lambda p: os.path.basename(p).lower()):
+        name = os.path.basename(path); rec = RECOMMENDED.get(name)
+        try: size = gb(os.path.getsize(path))
+        except OSError: size = "?"
+        proj = projector_for({"dir": os.path.dirname(path)})
+        big = next((v for k, v in BIGGER_PACKS.items() if name.startswith(k)), None)
+        if rec:
+            ctx = max(x for x in (rec.get("mtp_off"), rec.get("mtp_on")) if x)
+            what = f"{'expected' if rec.get('inferred') else 'tested'} on 8 GB: up to {ctx:,} tokens"
+            if name.startswith("Ternary-Bonsai-2.5-27B"): have_b25 = True
+        elif big: what = f"a bigger packing ({big}): on 8 GB use the PTQ1_0 file instead"
+        else:
+            fam = next(k for k in TESTED_FILES if name.startswith(k))
+            what = f"not tested here (the tested file is {TESTED_FILES[fam]}): you choose its context"
+        print(f"   {name}  {D}{size}{N}\n      {what}{'; image file next to it' if proj else ''}\n      {D}{path.replace(HOME, '~', 1)}{N}")
+        d = os.path.dirname(path)
+        if not d.startswith(hf_cache()): add_dir(st, d)
+    return 0 if have_b25 else 3
+
+
 def pick_model(st):
     while True:
         models = scan_models(st)
@@ -428,7 +471,7 @@ def pick_model(st):
         for i, m in enumerate(models, 1):
             rec = RECOMMENDED.get(m["name"]) or {}
             best = max([x for x in (rec.get("mtp_off"), rec.get("mtp_on")) if x] or [0])
-            tag = f"  {D}tested on 8 GB: up to {best:,} tokens{N}" if best else ""
+            tag = f"  {D}{'expected' if rec.get('inferred') else 'tested'} on 8 GB: up to {best:,} tokens{N}" if best else ""
             print(f"  {i:2d}) {m['name']}  {D}{gb(m['size'])}  {m['repo']}{N}{tag}")
         print(f"   d) download a model    f) add a folder to search    q) quit")
         v = ask("Model").lower()
@@ -476,7 +519,8 @@ def choose(st, model):
     last = st.get("_tried", {}).get(f"{model['name']}|{key}") or mem.get("ctx", {}).get(key)
     native = meta.get("context_length")
     print(f"\n{B}Context{N} (how many tokens the model can keep in view at once).")
-    if suggested: print(f"   Tested to fit on an 8 GB RTX 3070 Laptop with these settings: {suggested:,}")
+    if suggested and rec.get("inferred"): print(f"   Expected to fit on an 8 GB card (same weights as a tested file, about the same size): {suggested:,}")
+    elif suggested: print(f"   Tested to fit on an 8 GB RTX 3070 Laptop with these settings: {suggested:,}")
     else: print("   No tested number for this model: enter one (if it does not fit, the server will say so).")
     if last: print(f"   You used {last:,} last time.")
     if native: print(f"   {D}The model's own maximum: {native:,}{N}")
@@ -523,6 +567,8 @@ def main():
     try: sys.stdout.reconfigure(line_buffering=True)
     except Exception: pass
     for sg in (signal.SIGHUP, signal.SIGTERM): signal.signal(sg, _on_signal)
+    if "--inventory" in sys.argv:
+        return inventory(load_state())
     if "--add-dir" in sys.argv:
         st = load_state()
         return 0 if add_dir(st, sys.argv[sys.argv.index("--add-dir") + 1]) else 1

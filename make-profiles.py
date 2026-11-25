@@ -36,7 +36,8 @@ def sampling_fields(name):
 # short, typeable profile names: <model>[-mtp]-<context in thousands>k, e.g. bonsai2.5-27b-88k (lldash-cli start takes a prefix)
 SLUG = {"Ternary-Bonsai-2.5-27B-PTQ1_0.gguf": "bonsai2.5-27b", "Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf": "bonsai2.5-27b",
         "Ornith-1.5-9B-Q4_K_M.gguf": "ornith1.5-9b", "Ternary-Bonsai-2-9B-PTQ1_0.gguf": "bonsai2-9b",
-        "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf": "bonsai2-9b", "Ternary-Bonsai-2-27B-PTQ1_0.gguf": "bonsai2-27b"}
+        "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf": "bonsai2-9b", "Ternary-Bonsai-2-27B-PTQ1_0.gguf": "bonsai2-27b",
+        "Ternary-Bonsai-2-9B-PQ2_0.gguf": "bonsai2-9b", "Ternary-Bonsai-2-9B-Q2_0.gguf": "bonsai2-9b"}
 
 
 def nice(name):
@@ -89,7 +90,11 @@ def main():
     for m in L.scan_models(L.load_state()):
         for label, c in profiles_for(m).items():
             # one profile per model and MTP choice: a file with an MTP head run with MTP off is the same as the plain file
-            if label in chosen and "mtp" not in os.path.basename(chosen[label]["modelPath"]).lower(): continue
+            # (and a tested file wins over an inferred one: PTQ1_0 over PQ2_0 / Q2_0 for Bonsai 2 9B)
+            if label in chosen:
+                prev = os.path.basename(chosen[label]["modelPath"]); cur = os.path.basename(c["modelPath"])
+                rank = lambda n: (bool(L.RECOMMENDED.get(n, {}).get("inferred")), "mtp" in n.lower())
+                if rank(prev) <= rank(cur): continue
             chosen[label] = c
     for label, c in sorted(chosen.items()):
         profs[label] = {"config": c, "savedAt": now, "lastLoadedAt": None}; made.append((label, c["modelPath"]))
