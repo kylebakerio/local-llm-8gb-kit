@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
 """llm-tune: measure, on THIS machine, how much context a model fits in the GPU and how fast it runs.
 
-    python3 llm-tune.py            (or: llm-tune)    every model found, every MTP setting, the ones not measured yet
-    llm-tune --redo                                  measure everything again
+    python3 llm-tune.py            (or: llm-tune)    every model found, every MTP setting, the ones not measured yet;
+                                                     it asks whether to run the fit test, the speed test, or both
+    llm-tune --fit                                   the fit test only (does it load, the largest context that holds)
+    llm-tune --speed                                 the speed test only (at the context the fit test found)
+    llm-tune --redo                                  measure again what was measured before
     llm-tune --one                                   pick one model and its settings (MTP, images on the CPU or the GPU)
+    (they combine: llm-tune --fit --one, llm-tune --speed --redo, ...)
 
 For each model and setting:
-  1. FIT: finds the largest context that loads (by halving the range), fills it to 97% with real text, then sends
-     requests at a few depths -- llama.cpp takes a little more memory the first time it meets each kind of request, and a
-     context filled to the last megabyte can crash on that later -- stepping down until all of it holds. The suggestion
-     leaves at least 64 MiB of the GPU free.
+  1. FIT: first checks system RAM: a model that keeps part of itself in RAM (mixture of experts) needs that RAM free,
+     and one that does not get it would load, pass the GPU check, then swap. Then finds the largest context that loads
+     (by halving the range), fills it to 97% with real text, then sends requests at a few depths -- llama.cpp takes a
+     little more memory the first time it meets each kind of request, and a context filled to the last megabyte can
+     crash on that later -- stepping down until all of it holds. The suggestion leaves at least 64 MiB of the GPU free.
+     It also records the lowest free RAM and any swapping while the context was full.
   2. SPEED: reading and writing speed (tokens per second) at 4k, 32k and near the maximum, three answers per depth,
-     with the model's own recommended sampling. The GPU first cools (up to 4 minutes) for a 4k number on a cool card;
-     4k is measured again at the end, after the long run. Laptop GPUs slow themselves down when hot: the run records
-     the temperature, the clock and how often the GPU slowed itself, and says how much speed heat cost (and what helps).
+     with the model's own recommended sampling, at the context the fit test suggested. The GPU first cools (up to 4
+     minutes) for a 4k number on a cool card; 4k is measured again at the end, after the long run. Laptop GPUs slow
+     themselves down when hot: the run records the temperature, the clock and how often the GPU slowed itself, and says
+     how much speed heat cost (and what helps).
   3. Saves the result in ~/.config/llm-launch/tuned.json; llm-launch then suggests this machine's number and shows
      its speed and heat.
 
-Close other programs that use the GPU first (nvidia-smi shows them); keep the desktop on the Intel graphics (Pop's
-Compute or Hybrid graphics mode). A run takes roughly 12-30 minutes per model and setting: most of it is reading long
-prompts. Ctrl-C stops it and the server.
+Close other programs that use the GPU first (nvidia-smi shows them), and the ones that use a lot of RAM (a web browser)
+before measuring a model that runs partly from RAM; keep the desktop on the Intel graphics (Pop's Compute or Hybrid
+graphics mode). Roughly, per model and setting: fit 5-15 minutes, speed 10-15 (a model with experts in RAM: fit 15-45,
+speed 15-30); most of it is reading long prompts. Ctrl-C stops it and the server.
 Python 3.8+, standard library only; uses llm-launch.py from the same folder.
 """
 import glob, importlib.util, json, os, re, signal, subprocess, sys, threading, time, urllib.request
@@ -31,6 +39,8 @@ B, D, R, N = L.B, L.D, L.R, L.N
 TUNED = os.path.join(L.STATE_DIR, "tuned.json")
 PORT = 8095
 HEADROOM_MIB = 64
+MOE_FIT_MAX = 131072   # the fit search's ceiling for a model with experts in RAM: it reads prompts at ~150 tokens/s, so a
+                       # full-prompt check at 262k would take most of an hour (the tests ran at 88k)
 CURRENT = [None]
 IDLE_C = [None]        # the GPU's temperature when this run started (the cool-down aims near it)
 
@@ -208,15 +218,29 @@ HEAT_TIPS = """{B}To lose less speed to heat{N} (then measure again: llm-tune --
      plugged in, and compare. Whether it helps depends on the laptop."""
 
 
+def swap_used():
+    mi = L.meminfo()
+    return mi.get("SwapTotal", 0) - mi.get("SwapFree", 0) if mi else None
+
+
 class Sampler:
-    """Lowest free GPU memory while a request runs (sampled every 0.25 s)."""
+    """Lowest free GPU memory while a request runs, and the lowest free system RAM (MemAvailable) and the most swap in
+    use (sampled every 0.25 s)."""
     def __init__(self, idx):
-        self.idx, self.low, self._stop = idx, None, threading.Event()
+        self.idx, self.low, self.ram_low, self.swap_high, self._stop = idx, None, None, None, threading.Event()
     def __enter__(self):
         def run():
             while not self._stop.is_set():
                 try:
                     f = mem(self.idx)[1]; self.low = f if self.low is None else min(self.low, f)
+                except Exception: pass
+                try:
+                    mi = L.meminfo()
+                    a = mi.get("MemAvailable")
+                    if a is not None: self.ram_low = a if self.ram_low is None else min(self.ram_low, a)
+                    if "SwapTotal" in mi:
+                        sw = mi["SwapTotal"] - mi.get("SwapFree", 0)
+                        self.swap_high = sw if self.swap_high is None else max(self.swap_high, sw)
                 except Exception: pass
                 time.sleep(0.25)
         self._t = threading.Thread(target=run, daemon=True); self._t.start(); return self
@@ -226,7 +250,7 @@ class Sampler:
 
 # ------------------------------------------------------------------ the server
 def start(server, model, ctx, s, log):
-    p, argv = L.start_server(server, model, ctx, s["mtp"], s["draft_n"], s["proj"], s["proj_gpu"], PORT, log)
+    p, argv = L.start_server(server, model, ctx, s["mtp"], s["draft_n"], s["proj"], s["proj_gpu"], PORT, log, s.get("cpu_layers"))
     CURRENT[0] = p
     ok = L.wait_ready(p, PORT, timeout=900)
     return p, ok and p.poll() is None
@@ -271,8 +295,19 @@ def ask_at_depth(depth, n_predict, offset=0):
 
 
 # ------------------------------------------------------------------ fit
-def fit(server, model, s, idx, native, logdir):
-    """(largest context that held, suggested context, notes)."""
+def fit(server, model, s, idx, native, logdir, info=None):
+    """(largest context that held, suggested context, notes). info (a dict) gets the system RAM record: need_mib and
+    avail_mib before the search (short_mib when it was not enough: then nothing is started), and while the context was
+    full, min_avail_mib, swap_growth_mib and tight."""
+    info = {} if info is None else info
+    r = L.ram_check(model, s["mtp"], s.get("proj"), s.get("proj_gpu"))
+    info.update(need_mib=r["need"], avail_mib=r["avail"])
+    if r["short"]:
+        info["short_mib"] = r["short"]
+        return None, None, (f"not enough free system RAM: the model server needs about {L.gib(r['need'])}, plus about "
+                            f"{L.gib(L.RAM_HEADROOM_MIB)} for opencode and the desktop; {L.gib(r['avail'])} was free. Close other "
+                            f"programs (a web browser often holds 1-3 GB) and measure again")
+    swap0 = swap_used()
     def loads(ctx):
         p, ok = start(server, model, ctx, s, os.path.join(logdir, f"fit-{ctx}.log"))
         used = mem(idx)[0] if ok else None
@@ -290,6 +325,8 @@ def fit(server, model, s, idx, native, logdir):
                 for d in (2048, min(32768, ctx // 3)):
                     ask_at_depth(d, 64)
             low = sm.low
+            if sm.ram_low is not None: info["min_avail_mib"] = sm.ram_low
+            if sm.swap_high is not None and swap0 is not None: info["swap_growth_mib"] = max(0, sm.swap_high - swap0)
             return p.poll() is None, low
         except Exception:
             return False, low
@@ -321,7 +358,11 @@ def fit(server, model, s, idx, native, logdir):
     slope = (pts[ks[-1]] - pts[ks[0]]) / max(1, ks[-1] - ks[0]) if len(ks) > 1 else 0.02
     need = max(0, HEADROOM_MIB - (low if low is not None else HEADROOM_MIB))
     sug = ctx if need == 0 or slope <= 0 else max(4096, int((ctx - need / slope) // 1024 * 1024))
-    return ctx, sug, f"{low} MiB of the GPU stayed free at the fullest" if low is not None else ""
+    info["tight"] = bool((info.get("min_avail_mib") is not None and info["min_avail_mib"] < L.RAM_HEADROOM_MIB)
+                         or (info.get("swap_growth_mib") or 0) > 256)
+    note = f"{low} MiB of the GPU stayed free at the fullest" if low is not None else ""
+    if info.get("min_avail_mib") is not None: note += f"; {L.gib(info['min_avail_mib'])} of RAM stayed free"
+    return ctx, sug, note
 
 
 # ------------------------------------------------------------------ speed
@@ -410,38 +451,89 @@ def save(key, rec):
     return t
 
 
-def tune_one(server, model, s, setting_key, idx, gname):
-    """Fit, then speed, for one model + setting; saved either way (a model that does not fit is recorded as such)."""
+def needs(rec, what, redo=False):
+    """What a setting still needs for this run: (fit, speed). A fit recorded as short of system RAM counts as not
+    measured (close programs, run again); a fit-only record still needs its speed."""
+    has_fit = bool(rec) and not (rec.get("ram") or {}).get("short_mib")
+    has_speed = has_fit and bool(rec.get("speed"))
+    held = has_fit and bool(rec.get("suggested"))
+    f = what in ("fit", "both") and (redo or not has_fit)
+    sp = what in ("speed", "both") and (redo or not has_speed) and (held or not has_fit or f)
+    return f, sp
+
+
+def minutes(model, s, what):
+    """Rough minutes (low, high) for one setting: most of it is reading long prompts."""
+    moe = bool(L.cpu_layers_for(model["name"], s["mtp"]))
+    f, sp = what
+    return ((15 if moe else 5) * f + (15 if moe else 10) * sp, (45 if moe else 15) * f + (30 if moe else 15) * sp)
+
+
+def tune_one(server, model, s, setting_key, idx, gname, what="both", redo=False):
+    """The fit test, the speed test, or both, for one model + setting; saved after each (a model that does not fit is
+    recorded as such). The speed test runs at the context the fit test suggested; with no fit yet, the fit runs first."""
     meta = L.gguf_meta(model["path"])
     native = min(int(meta.get("context_length") or 262144), 262144)
+    if L.cpu_layers_for(model["name"], s["mtp"]): native = min(native, MOE_FIT_MAX)
     logdir = os.path.join(L.LOG_DIR, "tune-" + time.strftime("%Y%m%d-%H%M%S")); os.makedirs(logdir, exist_ok=True)
     label = L.setting_label(setting_key)
     print(f"\n{B}{model['name']}{N}  ({label})")
-    print(f"{B}Fit{N}: the largest context, searching 4,096 - {native:,}")
     t0 = time.time()
     with HeatLog(idx) as hl:
-        return _tune_one(server, model, s, setting_key, idx, gname, native, logdir, t0, hl)
+        return _tune_one(server, model, s, setting_key, idx, gname, native, logdir, t0, hl, what, redo)
 
 
-def _tune_one(server, model, s, setting_key, idx, gname, native, logdir, t0, hl):
-    held, sug, note = fit(server, model, s, idx, native, logdir)
-    rec = {"max_ctx": held or 0, "suggested": sug or 0, "speed": None, "gpu": gname, "measured": time.strftime("%Y-%m-%d %H:%M")}
-    if not held:
-        print(f"{R}   {note}{N}  (logs: {logdir})")
-        rec.update(note=note, minutes=round((time.time() - t0) / 60, 1))
-        save(f"{model['name']}|{setting_key}", rec); return rec
-    print(f"   {B}held: {held:,} tokens; suggested: {sug:,}{N}  {D}{note}{N}")
-    save(f"{model['name']}|{setting_key}", rec)                 # the fit is kept even if the speed test fails
-    print(f"{B}Speed{N} at {sug:,} tokens of context:")
+def _tune_one(server, model, s, setting_key, idx, gname, native, logdir, t0, hl, what="both", redo=False):
+    key = f"{model['name']}|{setting_key}"
+    old = load_tuned().get(key)
+    do_fit, do_speed = needs(old, what, redo)
+    if not do_fit and not do_speed:
+        print(f"   nothing to measure: {(old or {}).get('note') or 'it did not fit'} (the fit test measures it again: llm-tune --fit --one)")
+        return old
+    if do_speed and not do_fit and not (old and old.get("suggested") and not (old.get("ram") or {}).get("short_mib")):
+        print("   no fit measured yet for this setting; the speed test needs one, so the fit test runs first")
+        do_fit = True
+    if do_fit:
+        print(f"{B}Fit{N}: the largest context, searching 4,096 - {native:,}")
+        info = {}
+        held, sug, note = fit(server, model, s, idx, native, logdir, info)
+        rec = {"max_ctx": held or 0, "suggested": sug or 0, "speed": None, "gpu": gname, "measured": time.strftime("%Y-%m-%d %H:%M"),
+               "ram": info}
+        if old and old.get("speed") and held and old.get("suggested") == sug:      # same context: its speed still holds
+            rec.update(speed=old["speed"], **({"heat": old["heat"]} if old.get("heat") else {}))
+        if not held:
+            print(f"{R}   {note}{N}  (logs: {logdir})")
+            rec.update(note=note, minutes=round((time.time() - t0) / 60, 1))
+            save(key, rec); return rec
+        print(f"   {B}held: {held:,} tokens; suggested: {sug:,}{N}  {D}{note}{N}")
+        if info.get("tight"):
+            print(f"   {R}System RAM ran short while the context was full{N}"
+                  + (f" ({L.gib(info['min_avail_mib'])} free at the lowest" if info.get("min_avail_mib") is not None else " (")
+                  + (f", {info['swap_growth_mib']:,} MiB went to swap)" if info.get("swap_growth_mib") else ")")
+                  + ": with opencode running too it may slow down a lot. Close other programs while using this model.")
+        rec["fit_minutes"] = round((time.time() - t0) / 60, 1)
+        save(key, rec)                                     # the fit is kept even if the speed test fails
+        if not do_speed:
+            rec["minutes"] = rec["fit_minutes"]; save(key, rec)
+            print(f"{B}Result{N} ({rec['minutes']} min): held {held:,}, suggested {sug:,} (llm-launch suggests this from now on)"
+                  + ("" if rec.get("speed") else f"; speed not measured: llm-tune --speed"))
+            return rec
+    else:
+        rec = dict(old)
+    sug = rec["suggested"]
+    print(f"{B}Speed{N} at {sug:,} tokens of context" + ("" if do_fit else f" (the fit test's suggestion, {rec.get('measured', '')})") + ":")
+    t1 = time.time()
     try:
         rec["speed"], heat = speed(server, model, s, sug, logdir, idx, hl)
     except Exception as e:
         stop(); heat = None
         print(f"{R}   the speed test stopped with an error: {e}{N}  (logs: {logdir})")
     if heat: rec["heat"] = heat
+    rec["speed_measured"] = time.strftime("%Y-%m-%d %H:%M")
+    rec["speed_minutes"] = round((time.time() - t1) / 60, 1)
     rec["minutes"] = round((time.time() - t0) / 60, 1)
-    save(f"{model['name']}|{setting_key}", rec)
-    print(f"{B}Result{N} ({rec['minutes']} min): held {held:,}, suggested {sug:,} (llm-launch suggests this from now on)")
+    save(key, rec)
+    print(f"{B}Result{N} ({rec['minutes']} min): held {rec['max_ctx']:,}, suggested {sug:,} (llm-launch suggests this from now on)")
     if rec["speed"]: print("\n".join(L.speed_lines(rec, indent="   ", heat_summary=False)))
     for line in heat_lines(heat): print(line)
     return rec
@@ -449,15 +541,32 @@ def _tune_one(server, model, s, setting_key, idx, gname, native, logdir, t0, hl)
 
 def settings_for(model):
     """Every setting worth measuring, without questions: MTP off, plus MTP on when the file has the head; images on the
-    CPU (the projector loaded there when it is next to the model)."""
+    CPU (the projector loaded there when it is next to the model); a mixture-of-experts file in its tested layout."""
     meta = L.gguf_meta(model["path"])
     proj = L.projector_for(model)
     draft_n = next((n for k, n in L.DRAFT_N.items() if model["name"].startswith(k)), 2)
     out = []
     for mtp in ([False, True] if meta.get("nextn_predict_layers") else [False]):
         out.append(({"mtp": mtp, "draft_n": draft_n, "proj": proj, "proj_gpu": False},
-                    f"mtp={'on' if mtp else 'off'},images=cpu"))
+                    L.setting_key(model["name"], mtp, False, proj)))
     return out
+
+
+WHAT = {"f": "fit", "s": "speed", "b": "both"}
+
+
+def ask_what():
+    """--fit / --speed on the command line, else asked."""
+    if "--fit" in sys.argv and "--speed" not in sys.argv: return "fit"
+    if "--speed" in sys.argv and "--fit" not in sys.argv: return "speed"
+    if "--fit" in sys.argv: return "both"
+    print(f"\n{B}What to measure{N}:")
+    print("   f) the fit test: does it load, and the largest context that fits (in the GPU, with enough system RAM)")
+    print("   s) the speed test: reading and writing speed at that context, and what heat costs (needs a fit; runs it first if there is none)")
+    print("   b) both")
+    while True:
+        v = L.ask("Which", "b").lower()[:1]
+        if v in WHAT: return WHAT[v]
 
 
 def main():
@@ -473,6 +582,9 @@ def main():
     used, free = mem(idx)
     h0 = heat_now(idx); IDLE_C[0] = h0 and h0["temp"]
     print(f"{B}GPU{N}: {gname}, {total:,} MiB, {used:,} MiB in use now" + (f", {IDLE_C[0]:.0f} °C" if IDLE_C[0] is not None else ""))
+    mi = L.meminfo()
+    if mi.get("MemAvailable") is not None:
+        print(f"{B}System RAM{N}: {L.gib(mi['MemTotal'])}, {L.gib(mi['MemAvailable'])} free now")
     if ac_power() is False:
         print(f"{R}   The laptop is on battery.{N} On battery the GPU is held back hard, so the speeds would not be its real ones.")
         if not L.yes("Measure anyway?", default=False): return 1
@@ -483,30 +595,46 @@ def main():
     if not L.port_free(PORT):
         sys.exit(f"{R}port {PORT} is in use (another llm-tune?){N}")
     one = "--one" in sys.argv
+    what = ask_what()
     if not one:
         models = L.scan_models(st)
         tuned = load_tuned()
         todo, have = [], []
         for m in models:
             for s, k in settings_for(m):
-                (have if (f"{m['name']}|{k}" in tuned and not redo) else todo).append((m, s, k))
-        print(f"\n{B}Every model found{N}: {len(todo)} to measure" + (f", {len(have)} already measured (llm-tune --redo measures them again)" if have else ""))
-        for m, s, k in todo: print(f"   {m['name']}  ({L.setting_label(k)})")
+                n = needs(tuned.get(f"{m['name']}|{k}"), what, redo)
+                (todo if any(n) else have).append((m, s, k, n))
+        label = {"fit": "the fit test", "speed": "the speed test", "both": "the fit and speed tests"}[what]
+        print(f"\n{B}Every model found, {label}{N}: {len(todo)} to measure"
+              + (f", {len(have)} already measured (llm-tune --redo measures them again)" if have else ""))
+        short = []
+        for m, s, k, n in todo:
+            r = L.ram_check(m, s["mtp"], s.get("proj"), s.get("proj_gpu")) if L.cpu_layers_for(m["name"], s["mtp"]) else None
+            steps = " + ".join(x for x, on in (("fit", n[0]), ("speed", n[1])) if on)
+            print(f"   {m['name']}  ({L.setting_label(k)}): {steps}"
+                  + (f"  {R}needs about {L.gib(r['need'] + L.RAM_HEADROOM_MIB)} of free RAM, {L.gib(r['avail'])} free now{N}" if r and r["short"] else ""))
+            if r and r["short"]: short.append(m["name"])
         if not todo:
             print("   nothing left to measure"); print("\n".join(L.results_table(tuned))); return 0
-        print(f"   about {len(todo) * 12}-{len(todo) * 30} minutes in all. Leave the laptop plugged in; Ctrl-C stops it (finished ones stay saved).")
+        lo = sum(minutes(m, s, n)[0] for m, s, k, n in todo); hi = sum(minutes(m, s, n)[1] for m, s, k, n in todo)
+        print(f"   about {lo}-{hi} minutes in all. Leave the laptop plugged in; Ctrl-C stops it (finished ones stay saved).")
+        if short:
+            print(f"   {R}Not enough free RAM now for {len(short)} of them:{N} those are recorded as such and skipped. Close other programs "
+                  f"(a web browser often holds 1-3 GB) and run llm-tune again to measure them.")
         a = L.ask("Measure all of these (a), or pick one model (p)?", "a").lower()
         one = a.startswith("p")
+        todo = [(m, s, k) for m, s, k, n in todo]
     if one:
         model = L.pick_model(st)
         c = L.choose(st, model, ask_ctx=False)          # the MTP / images questions
         todo = [(model, {"mtp": c["mtp"], "draft_n": c["draft_n"], "proj": c["proj"], "proj_gpu": c["proj_gpu"]}, c["key"])]
+        redo = True                                     # one model picked by hand: measure it (again)
     t0 = time.time()
     hot = []
     for n, (m, s, k) in enumerate(todo, 1):
         if len(todo) > 1: print(f"\n{D}[{n} of {len(todo)}]{N}", end="")
         try:
-            rec = tune_one(server, m, s, k, idx, gname)
+            rec = tune_one(server, m, s, k, idx, gname, what, redo)
             if ((rec or {}).get("heat") or {}).get("severity") in ("moderate", "heavy"): hot.append(rec["heat"])
         except Exception as e:
             stop(); print(f"{R}   {m['name']} ({L.setting_label(k)}) stopped with an error: {e}{N}")
