@@ -28,7 +28,7 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
   - v1.1 is v1 with some extra work trimmed. The model keeps a todo list only when a request has more than one problem. It updates that list along with its next step. It doesn't re-read code it has just edited. In a first small test, on a different model, v1.1 scored about the same as v1: 9 of 11 against 10 of 11. It did not save time there. More tests are running.
   - When opencode summarizes a long session, the model is now told "Continue with the task." Before, it was told to continue or to stop and ask.
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
-- **The task driver is removed for now.** Our tests are moving to the new prompt first.
+- **The task driver is now your choice, and off by default.** At each start the launcher asks: *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* It remembers your answer for the next time. This is a newer version, 0.4.1, than the one the kit had before. See *What the launcher changes*.
 - **`llm-tune` runs the fit test and the speed test separately.** For any model you can run either one. The fit test now also checks system RAM.
 - **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to under 2 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
 
@@ -137,6 +137,8 @@ It asks, in order:
    - It remembers the context that worked for each model.
 
 For a model that runs partly from system RAM, it also says how much free RAM the model needs and how much there is. If there isn't enough, it warns you before starting.
+
+5. **Task driver:** *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* The default is no, or your answer from last time.
 
 If the model server fails to start:
 - The launcher shows the error.
@@ -371,6 +373,10 @@ The Uncensored Bonsai 2.5 edit runs with Bonsai 2.5's settings.
     - the original request again, word for word;
     - a task checklist that marks each item of the request as done, in progress, or not started. The model is asked to make its todo list match it.
   - Each time a session is summarized, the plugin also saves the whole conversation so far to a text file in `~/.local/share/opencode/history/`.
+- **With the task driver turned on,** the session gets a different set:
+  - the same v1.1 system prompt;
+  - the **task driver** (`plugins/opencode-task-driver-0.4.1.js`, focus mode). When a request holds several separate problems, it has the model file them as tasks, and works them one at a time, each on a clean slate with a short handoff from the tasks before. After a summary it brings back the current task, and it handles the turn after the summary itself. A single-problem request runs as one task.
+  - The compaction-anchor parts are left out, because the task driver does that work for each task.
 - **`~/.config/llm-launch/`:** your choices, downloaded plugins, and `llm-tune`'s measurements.
 - **`~/models/<repo>/`:** the models you download from the launcher's menu.
 - **`~/.cache/llm-launch/`:** the model server's logs.

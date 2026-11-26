@@ -39,6 +39,26 @@
           "options": {"file": "{kit}/prompts/v1-1.md", "continueText": "Continue with the task."}
         }
       ]
+    },
+    {
+      "id": "task-driver",
+      "name": "task driver 0.4.1 + v1.1 prompt",
+      "ask": "Turn on the task driver? It is much more reliable on complex tasks, but can take much longer",
+      "plugins": [
+        {
+          "name": "system prompt v1.1 (in place of opencode's own instructions; the task driver handles the turn after a summary)",
+          "file": "plugins/system-prompt.js",
+          "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
+          "prompt_sha256": "bdd1391138981fcc4b3008f877fa2d28983f61c2e2c9beee3510f2e9dec9cf02",
+          "options": {"file": "{kit}/prompts/v1-1.md"}
+        },
+        {
+          "name": "task driver 0.4.1 (focus mode: a request with several problems is split into tasks, worked one at a time)",
+          "file": "plugins/opencode-task-driver-0.4.1.js",
+          "sha256": "bad0a8e04e939152c00b515c76fa62ef832fc2dd19ed4c7495520ffe44998675",
+          "options": {"mode": "focus"}
+        }
+      ]
     }
   ],
   "opencode_config": {
