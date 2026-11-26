@@ -137,9 +137,8 @@ DOWNLOADS = [
     {"label": "Ornith 1.5 35B-A3B IQ3_XXS (experts in RAM, MTP; being tested)", "repo": "bartowski/Ornith-1.5-35B-A3B-GGUF",
      "rev": "64b0493d34a5ca4c1b4ad67bb99b41d74b4f07d6", "new": "2026-11-26",
      "files": [("Ornith-1.5-35B-A3B-IQ3_XXS.gguf", 15340447392, "8918ccb9ee29abe3875efec0c3e86f0e35ef0b8a03e3f0e1c422869859a518d0")]},
-    {"label": "Qwen3.8-27B EXL3 2.00 bits per weight (turboderp; needs the EXL3 engine: experimental)", "kind": "dir",
+    {"label": "Qwen3.8-27B EXL3 2.00 bits per weight (turboderp; EXL3 engine, experimental; too big for 8 GB in the first test)", "kind": "dir",
      "repo": "turboderp/Qwen3.8-27B-exl3", "rev": "98f2f8dfab4cb73ed1ae3428a1671483ab05c490", "subdir": "turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw", "needs": "exl3",
-     "new": "2026-11-26",
      "files": [
                (".gitattributes", 1570, "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"),
                ("LICENSE", 11544, "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"),
@@ -178,7 +177,7 @@ DOWNLOADS = [
                ("tokenizer_config.json", 17928, "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27"),
                ("video_preprocessor_config.json", 385, "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"),
                ("vocab.json", 6722759, "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003")]},
-    {"label": "Qwen3.8-27B EXL3 1.75 bits per weight (turboderp; needs the EXL3 engine: experimental)", "kind": "dir",
+    {"label": "Qwen3.8-27B EXL3 1.75 bits per weight (turboderp; EXL3 engine, experimental)", "kind": "dir",
      "repo": "turboderp/Qwen3.8-27B-exl3", "rev": "2c1a38c2de43eab08cc8fba99656dc488e698cfb", "subdir": "turboderp__Qwen3.8-27B-exl3__SCP_1.75bpw", "needs": "exl3",
      "new": "2026-11-26",
      "files": [
@@ -228,12 +227,18 @@ DOWNLOADS = [
 ]
 # EXL3 (EXPERIMENTAL, still being tested): EXL3 models run on TabbyAPI + exllamav3, installed by install-exl3.sh into
 # ~/exl3. A folder is an EXL3 model when its config.json says quant_method "exl3"; the tested ones are told apart by their
-# first weights file (name:size). Their contexts are the lab's targets for an 8 GB card, NOT yet measured: 2.00 bits per
-# weight at about 40k tokens, 1.75 at about 80k; K/V cache 4-bit (cache_mode 4,4); MTP draft 2 tokens.
+# first weights file (name:size). K/V cache 4-bit (cache_mode 4,4), MTP draft 2 tokens, prompt chunks of 2,048 (the lab's
+# settings). The lab's first tests (an RTX 4090 Laptop, no cap, 11-26): 2.00 bpw with MTP off peaked at 8,410 MiB at 32k
+# tokens and 8,990 at 64k (about 18 MiB per 1,000 tokens); its MTP head took ~330-370 MiB more; 1.75 bpw at 80k peaked at
+# 8,470 (7,988 once loaded). So on a real 8 GB card (~7,800 MiB usable) 2.00 bpw does not fit, and 1.75 bpw fits about
+# 36k tokens with MTP off, 16k with it on: ESTIMATES from those numbers, not measured under an 8 GB cap.
 EXL3_HOME = os.environ.get("EXL3_HOME") or os.path.join(HOME, "exl3")
 EXL3_RECOMMENDED = {
-    "model-00001-of-00002.safetensors:8570690830": {"label": "Qwen3.8-27B EXL3 2.00 bpw", "ctx": 40960, "draft_n": 2, "cache_mode": "4,4"},
-    "model-00001-of-00002.safetensors:8587658013": {"label": "Qwen3.8-27B EXL3 1.75 bpw", "ctx": 81920, "draft_n": 2, "cache_mode": "4,4"},
+    "model-00001-of-00002.safetensors:8570690830": {"label": "Qwen3.8-27B EXL3 2.00 bpw", "ctx": {}, "draft_n": 2, "cache_mode": "4,4",
+        "note": "Too big for an 8 GB card in the lab's first test: 8,410 MiB of GPU memory at 32k tokens with MTP off. "
+                "The 1.75 bpw folder is the one for this laptop."},
+    "model-00001-of-00002.safetensors:8587658013": {"label": "Qwen3.8-27B EXL3 1.75 bpw", "ctx": {"mtp_off": 36864, "mtp_on": 16384},
+                                                    "draft_n": 2, "cache_mode": "4,4"},
 }
 # (the system prompt is prompts/v1-1.md, delivered by plugins/system-prompt.js; kit.json says which plugins a session gets)
 
@@ -670,16 +675,20 @@ def choose_exl3(st, model):
     mem = st.setdefault("models", {}).setdefault(model["name"], {})
     print(f"\n{B}EXL3 engine{N} ({R}experimental{N}: our tests of it are still running). {info['bits']} bits per weight"
           + (f": {rec['label']}." if rec else "; not a file this kit tested."))
+    if rec.get("note"): print(f"   {R}{rec['note']}{N}")
+    ctxs = rec.get("ctx") or {}
     mtp = False
     if info["mtp"]:
         print(f"\n{B}MTP{N} (a built-in draft head that makes generation faster).")
-        mtp = yes("Use MTP?", default=mem.get("mtp", True))
+        on, off = ctxs.get("mtp_on"), ctxs.get("mtp_off")
+        if on and off: print(f"   {D}Estimated for an 8 GB card: about {on:,} tokens with MTP on, {off:,} with it off.{N}")
+        mtp = yes("Use MTP?", default=mem.get("mtp", bool(on) and (not off or on >= 0.9 * off)))
     key = f"engine=exl3,mtp={'on' if mtp else 'off'}"
-    suggested = rec.get("ctx")
+    suggested = ctxs.get("mtp_on" if mtp else "mtp_off")
     last = st.get("_tried", {}).get(f"{model['name']}|{key}") or mem.get("ctx", {}).get(key)
     native = info.get("native")
     print(f"\n{B}Context{N} (how many tokens the model can keep in view at once).")
-    if suggested: print(f"   The lab's target for an 8 GB card: {suggested:,} (not measured yet: if it does not fit, try less)")
+    if suggested: print(f"   Estimated for an 8 GB card from the lab's first tests: {suggested:,} (not measured on 8 GB yet: if it does not fit, try less)")
     else: print("   No number for this model: enter one (if it does not fit, the server will say so)")
     if last: print(f"   You used {last:,} last time.")
     while True:
@@ -1233,7 +1242,7 @@ def inventory(st):
     for d in exl3_found:
         info = exl3_info(d); rec = EXL3_RECOMMENDED.get(info["sig"])
         print(f"   {os.path.basename(d)}  {D}{gb(info['size'])}{N}\n      EXL3 ({info['bits']} bits per weight; experimental)"
-              + (f": the lab's target {rec['ctx']:,} tokens" if rec else ": not tested here")
+              + (f": estimated {max((rec.get('ctx') or {}).values() or [0]):,} tokens on 8 GB" if rec and rec.get("ctx") else ": " + (rec or {}).get("note", "not tested here"))
               + ("" if exl3_installed() else "; needs the EXL3 engine (bash install-exl3.sh)") + f"\n      {D}{d.replace(HOME, '~', 1)}{N}")
         if not d.startswith(hf_cache()): add_dir(st, os.path.dirname(d))
     return 0 if have_b25 else 3
@@ -1260,7 +1269,8 @@ def pick_model(st):
                        + (f" (+{len(here) - 1} more setting{'s' if len(here) > 2 else ''})" if len(here) > 1 else "") + f"{N}")
             if m.get("engine") == "exl3":
                 r = EXL3_RECOMMENDED.get(m["exl3"]["sig"]) or {}
-                tag = f"  {D}EXL3, experimental" + (f": about {r['ctx']:,} tokens (not measured yet)" if r else "") + f"{N}"
+                best = max((r.get("ctx") or {}).values() or [0])
+                tag = f"  {D}EXL3, experimental" + (f": about {best:,} tokens, estimated" if best else (": does not fit 8 GB in the first test" if r else "")) + f"{N}"
                 if not exl3_installed(): tag += f"  {R}needs the EXL3 engine: bash install-exl3.sh{N}"
             print(f"  {i:2d}) {m['name']}  {D}{gb(m['size'])}  {m['repo']}{N}{tag}")
         print(f"   d) download a model    f) add a folder to search    r) measurements on this machine    q) quit")

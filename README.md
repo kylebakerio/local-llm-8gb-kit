@@ -30,7 +30,7 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
 - **The task driver is removed for now.** Our tests are moving to the new prompt first.
 - **`llm-tune` runs the fit test and the speed test separately.** For any model you can run either one. The fit test now also checks system RAM.
-- **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to about 2 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
+- **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to under 2 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
 
 ## One-time setup
 
@@ -160,11 +160,11 @@ Gemma 4 26B-A4B, Qwen 3.6 35B-A3B and Ornith 1.5 35B-A3B are bigger than the car
 **System RAM is the tight part on a 16 GB laptop.** While running, these models need about 10.5 to 11.5 GB of RAM. That covers the experts, the server's own working memory, and up to 2 GB of prompt cache. opencode and the desktop need about 1 GB more. So **close the web browser** and other large programs first. If RAM runs out, the model slows down a lot, or the server stops.
 - The launcher shows the need and what is free before it starts.
 - When only MTP on would be short of RAM, it suggests MTP off.
-- `llm-tune`'s fit test checks RAM first, and records it if RAM ran short.
+- `llm-tune`'s fit test checks RAM first, and watches for RAM running short while the context is full.
 
 ### EXL3 models (experimental)
 
-EXL3 is a different way of packing a model into fewer bits, run by a different engine: TabbyAPI with exllamav3, instead of llama.cpp. At about 2 bits per weight it puts the main weights of Qwen3.8-27B, a dense 27B model, on the card: about 6.2 GB at 2.00 bits and 5.4 GB at 1.75. The download is bigger, since it also holds parts that stay off the card, such as the image part. **It is experimental: our tests of it on an 8 GB card are still running, and none of its numbers below are measured yet.**
+EXL3 is a different way of packing a model into fewer bits, run by a different engine: TabbyAPI with exllamav3, instead of llama.cpp. At about 2 bits per weight it puts the main weights of Qwen3.8-27B, a dense 27B model, on the card: about 6.2 GB at 2.00 bits and 5.4 GB at 1.75. The download is bigger, since it also holds parts that stay off the card, such as the image part. **It is experimental: our tests of it are still running, and none of its numbers below were measured on an 8 GB card yet.**
 
 - **Install the engine** (about 5 GB to download, 9 GB on disk, into `~/exl3`): `bash install-exl3.sh`, or say yes when `setup.sh` asks.
   - It gets Python 3.12 through uv, so nothing on the system changes.
@@ -172,13 +172,15 @@ EXL3 is a different way of packing a model into fewer bits, run by a different e
   - It needs git and NVIDIA driver 570 or newer.
 - **Get a model** from the launcher's download menu (`d`). Each one is a folder of files, every file checked:
 
-  | Model | Download | The lab's target context on 8 GB |
+  | Model | Download | On 8 GB, from the lab's first tests (on another card, estimated) |
   |---|---|---|
-  | Qwen3.8-27B EXL3, 2.00 bits per weight | 9.9 GB | about 40,000 tokens |
-  | Qwen3.8-27B EXL3, 1.75 bits per weight | 9.0 GB | about 80,000 tokens |
+  | Qwen3.8-27B EXL3, 1.75 bits per weight | 9.0 GB | about 36,000 tokens with MTP off, 16,000 with it on |
+  | Qwen3.8-27B EXL3, 2.00 bits per weight | 9.9 GB | too big: 8,410 MiB of GPU memory at 32,000 tokens, with MTP off |
+
+  Use the 1.75 bits-per-weight folder on this laptop. In that first test the model wrote 17 tokens/s at short context with MTP off, and 22 with MTP on, on a faster laptop GPU.
 
 - **The launcher** finds EXL3 model folders like the other models, and marks them *EXL3, experimental*.
-  - It asks about MTP (a draft of 2 tokens) and the context, starts TabbyAPI, and opens opencode on it, with the same plugins as the other models.
+  - It asks about MTP (a draft of 2 tokens) and the context, starts TabbyAPI, and opens opencode on it, with the same plugins as the other models. On 8 GB, MTP costs more than half the context, so it is off by default.
   - The K/V cache is 4-bit, and sampling follows the model's own settings: temperature 1.0, top-p 0.95, top-k 20.
   - If the context does not fit, the launcher shows TabbyAPI's error. Try a smaller one.
 - **Not covered yet:** `llm-tune` measures llama.cpp models only, LL-Dash has no profiles for EXL3, and `llm-launch --attach` does not work with it.
@@ -187,7 +189,7 @@ EXL3 is a different way of packing a model into fewer bits, run by a different e
 
 The contexts the launcher suggests were measured on a test GPU of the same generation as the 3070 Laptop. `llm-tune` measures them on this laptop instead: for any model file, including ones not in the table below, such as a different Ornith quant. With the setting you choose (MTP, images), it runs two tests. You can run them together or separately:
 
-- **The fit test** checks whether the model loads and finds the largest context that loads and holds. It fills the context to 97% with real text, then sends requests at a few depths. It checks system RAM first: a model that runs partly from RAM is skipped when there isn't enough, and you can measure it again after closing programs. It also records the lowest free RAM while the context was full.
+- **The fit test** checks whether the model loads and finds the largest context that loads and holds. It fills the context to 97% with real text, then sends requests at a few depths. It checks system RAM first: a model that runs partly from RAM is skipped when there isn't enough, and you can measure it again after closing programs. While the context is full, it also watches whether RAM runs short: the lowest free RAM, any swapping, and how often the model had to be read back from disk.
 - **The speed test** measures reading and writing speed at 4k, 32k and near the context the fit test found, and *what heat costs* (see *Heat* below). It needs a fit result, and runs the fit test first if there is none.
 
 At the end it prints a table of this run and of every measurement on this machine. The launcher then:

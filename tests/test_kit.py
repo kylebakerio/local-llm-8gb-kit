@@ -269,7 +269,9 @@ class TestEXL3(unittest.TestCase):
             self.assertEqual(len(ms), 1)
             m = ms[0]
             self.assertTrue(m["exl3"]["mtp"]); self.assertEqual(m["exl3"]["bits"], 2.0)
-            self.assertEqual(L.EXL3_RECOMMENDED[m["exl3"]["sig"]]["ctx"], 40960)
+            rec = L.EXL3_RECOMMENDED[m["exl3"]["sig"]]          # 2.00 bpw: too big for 8 GB in the lab's first test
+            self.assertEqual(rec["ctx"], {}); self.assertIn("Too big", rec["note"])
+            self.assertEqual(L.EXL3_RECOMMENDED["model-00001-of-00002.safetensors:8587658013"]["ctx"], {"mtp_off": 36864, "mtp_on": 16384})
 
     def test_tabby_config_is_the_lab_layout(self):
         m = {"path": "/m/turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw/", "name": "x"}
@@ -286,6 +288,12 @@ class TestEXL3(unittest.TestCase):
         m = {"name": "x", "exl3": {"sig": "none", "bits": 2.0, "mtp": False, "native": 262144}}
         with mock.patch.object(L, "ask", lambda *a, **k: "40000"):
             self.assertEqual(L.choose_exl3(st, m)["ctx"], 39936)
+        # 1.75 bpw: MTP costs more than half the context on 8 GB, so the default is off, and the context follows the choice
+        m = {"name": "y", "exl3": {"sig": "model-00001-of-00002.safetensors:8587658013", "bits": 1.75, "mtp": True, "native": 262144}}
+        asked = []
+        with mock.patch.object(L, "yes", lambda q, default=True: asked.append(default) or default), mock.patch.object(L, "ask", lambda q, default=None: default):
+            c = L.choose_exl3({}, m)
+        self.assertEqual((asked, c["mtp"], c["ctx"]), ([False], False, 36864))
 
     def test_health_accepts_tabbys_answer(self):
         import http.server, threading
@@ -309,6 +317,15 @@ class TestEXL3(unittest.TestCase):
             self.assertIn(f"{w[0]}:{w[1]}", L.EXL3_RECOMMENDED)
             with tempfile.TemporaryDirectory() as t, mock.patch.object(L, "MODELS_DIR", t):
                 self.assertEqual(len(L.missing_files(d)), len(d["files"]))
+
+
+class TestRamSignals(unittest.TestCase):
+    def test_majflt_reads_field_12(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".stat", delete=False) as f:
+            f.write("4242 (llama-server x) S 1 4242 4242 0 -1 4194560 120 0 77 0 5 6 0 0 20 0 9 0 100 200 300\n"); path = f.name
+        try: self.assertEqual(T.majflt(4242, path), 77)
+        finally: os.remove(path)
+        self.assertIsNone(T.majflt(-1, "/nonexistent/stat"))
 
 
 if __name__ == "__main__":

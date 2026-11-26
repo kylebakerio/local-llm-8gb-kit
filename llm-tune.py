@@ -15,7 +15,9 @@ For each model and setting:
      (by halving the range), fills it to 97% with real text, then sends requests at a few depths -- llama.cpp takes a
      little more memory the first time it meets each kind of request, and a context filled to the last megabyte can
      crash on that later -- stepping down until all of it holds. The suggestion leaves at least 64 MiB of the GPU free.
-     It also records the lowest free RAM and any swapping while the context was full.
+     It also records the lowest free RAM, any swapping, and how often the server had to read its weights back from
+     disk (major page faults: what running short of RAM looks like for weights mapped from the file) while the context
+     was full.
   2. SPEED: reading and writing speed (tokens per second) at 4k, 32k and near the maximum, three answers per depth,
      with the model's own recommended sampling, at the context the fit test suggested. The GPU first cools (up to 4
      minutes) for a 4k number on a cool card; 4k is measured again at the end, after the long run. Laptop GPUs slow
@@ -218,6 +220,18 @@ HEAT_TIPS = """{B}To lose less speed to heat{N} (then measure again: llm-tune --
      plugged in, and compare. Whether it helps depends on the laptop."""
 
 
+MAJFLT_TIGHT = 2000   # major page faults during the requests after the full prompt that mean RAM ran short: the weights
+                      # kept in RAM are mapped from the model file, so when RAM runs out the kernel drops them and reads
+                      # them back from disk (major faults) -- MemAvailable and swap stay quiet while that happens
+
+
+def majflt(pid, stat=None):
+    """The process's major page faults so far (/proc/<pid>/stat field 12), None if unknown."""
+    try:
+        with open(stat or f"/proc/{pid}/stat") as f: return int(f.read().rsplit(")", 1)[1].split()[9])
+    except (OSError, ValueError, IndexError): return None
+
+
 def swap_used():
     mi = L.meminfo()
     return mi.get("SwapTotal", 0) - mi.get("SwapFree", 0) if mi else None
@@ -322,8 +336,11 @@ def fit(server, model, s, idx, native, logdir, info=None):
             if not ok: return False, None
             with Sampler(idx) as sm:
                 post("/completion", {"prompt": text_tokens(int(ctx * 0.97) - 64), "n_predict": 32, "cache_prompt": False})
+                f0 = majflt(p.pid)                # the full prompt has touched every weight once: the rest should be in RAM
                 for d in (2048, min(32768, ctx // 3)):
                     ask_at_depth(d, 64)
+                f1 = majflt(p.pid)
+            if f0 is not None and f1 is not None: info["major_faults"] = f1 - f0
             low = sm.low
             if sm.ram_low is not None: info["min_avail_mib"] = sm.ram_low
             if sm.swap_high is not None and swap0 is not None: info["swap_growth_mib"] = max(0, sm.swap_high - swap0)
@@ -359,7 +376,7 @@ def fit(server, model, s, idx, native, logdir, info=None):
     need = max(0, HEADROOM_MIB - (low if low is not None else HEADROOM_MIB))
     sug = ctx if need == 0 or slope <= 0 else max(4096, int((ctx - need / slope) // 1024 * 1024))
     info["tight"] = bool((info.get("min_avail_mib") is not None and info["min_avail_mib"] < L.RAM_HEADROOM_MIB)
-                         or (info.get("swap_growth_mib") or 0) > 256)
+                         or (info.get("swap_growth_mib") or 0) > 256 or (info.get("major_faults") or 0) > MAJFLT_TIGHT)
     note = f"{low} MiB of the GPU stayed free at the fullest" if low is not None else ""
     if info.get("min_avail_mib") is not None: note += f"; {L.gib(info['min_avail_mib'])} of RAM stayed free"
     return ctx, sug, note
@@ -509,7 +526,8 @@ def _tune_one(server, model, s, setting_key, idx, gname, native, logdir, t0, hl,
         if info.get("tight"):
             print(f"   {R}System RAM ran short while the context was full{N}"
                   + (f" ({L.gib(info['min_avail_mib'])} free at the lowest" if info.get("min_avail_mib") is not None else " (")
-                  + (f", {info['swap_growth_mib']:,} MiB went to swap)" if info.get("swap_growth_mib") else ")")
+                  + (f", {info['swap_growth_mib']:,} MiB went to swap" if info.get("swap_growth_mib") else "")
+                  + (f", {info['major_faults']:,} reads of the model back from disk)" if (info.get("major_faults") or 0) > MAJFLT_TIGHT else ")")
                   + ": with opencode running too it may slow down a lot. Close other programs while using this model.")
         rec["fit_minutes"] = round((time.time() - t0) / 60, 1)
         save(key, rec)                                     # the fit is kept even if the speed test fails
