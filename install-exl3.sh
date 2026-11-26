@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Optional and EXPERIMENTAL: the EXL3 engine, for the EXL3 models (Qwen3.8-27B EXL3 at 2.00 and 1.75 bits per weight).
+# Optional and EXPERIMENTAL: the EXL3 engine, for the EXL3 models (Qwen3.8-27B EXL3 at 1.75 bits per weight).
 #     bash install-exl3.sh           (setup.sh offers it; safe to run again: what is already done is skipped)
 # Installs into ~/exl3 only (EXL3_HOME to change it); nothing needs sudo:
 #   - uv 0.13.7 (a Python package installer, checked against its published sha256), and with it Python 3.12;

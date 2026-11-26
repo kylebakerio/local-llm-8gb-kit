@@ -137,46 +137,6 @@ DOWNLOADS = [
     {"label": "Ornith 1.5 35B-A3B IQ3_XXS (experts in RAM, MTP; being tested)", "repo": "bartowski/Ornith-1.5-35B-A3B-GGUF",
      "rev": "64b0493d34a5ca4c1b4ad67bb99b41d74b4f07d6", "new": "2026-11-26",
      "files": [("Ornith-1.5-35B-A3B-IQ3_XXS.gguf", 15340447392, "8918ccb9ee29abe3875efec0c3e86f0e35ef0b8a03e3f0e1c422869859a518d0")]},
-    {"label": "Qwen3.8-27B EXL3 2.00 bits per weight (turboderp; EXL3 engine, experimental; too big for 8 GB in the first test)", "kind": "dir",
-     "repo": "turboderp/Qwen3.8-27B-exl3", "rev": "98f2f8dfab4cb73ed1ae3428a1671483ab05c490", "subdir": "turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw", "needs": "exl3",
-     "files": [
-               (".gitattributes", 1570, "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"),
-               ("LICENSE", 11544, "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"),
-               ("README.md", 65012, "57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641"),
-               ("cal_trace.json", 3410836, "7a3436f016f3f1822bc5de1cdbb23797965c145411b3c5c600fb27812d87dd2d"),
-               ("cal_trace.md", 2274406, "1356cd7eaa5eaf5eb4182529d925d5fa579eb28ac749032248a8e08632ccdcbc"),
-               ("cal_trace.safetensors", 4096088, "a034bee4c7920b4ac2e62b9d881a9b118488c414a81cf89aa64bd9274c47d685"),
-               ("chat_template.jinja", 9004, "af16f654968d47d09a6c604e00370b12dbc21f76456f59c9e98b82e84d9f6375"),
-               ("config.json", 4645, "4dfda0f243b79870356ae053cc8c5961abb25b6bf028bf9fa7fb86dcbc4a231a"),
-               ("crc32.txt", 238, "b42dd291f5f98b05807e458f5b47849969a9b3326acbf0c97d28b05826740b83"),
-               ("generation_config.json", 202, "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"),
-               ("kld_table.json", 190470, "aae4c43ba9b95749bd8cd1c0eb92012830d23d95706350538a80319829325720"),
-               ("measurement.json", 60916, "0ee08dec3537a438830198570b7dd492ee546b941901247b2d9654ed9deaaf6b"),
-               ("merges.txt", 3353259, "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"),
-               ("model-00001-of-00002.safetensors", 8570690830, "b6dc6ac9660936a3b3431546085c64680d11f04c29aedcf5181d01cd3486df49"),
-               ("model-00002-of-00002.safetensors", 1274185392, "a9c41b299c294b69d926efae202b4ee383e75fbfe8bf59fc336010c579c2e03f"),
-               ("model.safetensors.index.json", 295619, "ca964393247aa41add1369e1c1fa657b254098f0b8bb72b602ac918b155ced90"),
-               ("noise_attrib.json", 257094, "82c41c57a5970de325cdb5bc137a62b67fd0ba3bbe5be94f0d009099dd6182cd"),
-               ("preprocessor_config.json", 390, "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"),
-               ("qbench_prompts_div.json", 1920186, "4800f95d62e910fd098703b107e3bb26c376005bb2c53dfc7d3fe2323d1914f2"),
-               ("qbench_prompts_div.md", 1314356, "0158b7fe7e790e187e334fbed7abe88740e7c6692c1757583a8c736c639de4b8"),
-               ("qbench_prompts_gen.json", 344109, "6070481d810633355e264a618f8a3727af0fc135b3c3671c917928dc6dc215ed"),
-               ("qbench_prompts_gen.md", 228736, "a5a75cf17d725e15440afe644f41a090c2b860fe02f5ea1e69bff3bcd750b3a4"),
-               ("quantization_config.json", 629282, "1c29cdc8932a561ece5d47a19ebee78d7761eda3db315ff421d9a12de6e3c064"),
-               ("recipe_1.40bpw.yaml", 21487, "395099be69595d56444d53b8d3f3ae05141cbd02814e07256ca8e487acc28dc7"),
-               ("recipe_1.60bpw.yaml", 21487, "3ed1ef00984736488668efe456180ec3d1835a2009712aff2efe357c597f61e2"),
-               ("recipe_1.80bpw.yaml", 21487, "5fd281e12bb5fa0107d93ae470ba1c4f5d1f8d495e37f4734656b0c80854aa03"),
-               ("recipe_2.00bpw.yaml", 21490, "ef5ea53d7566b52638e6481ed7efedf0be26c868a4d50b5abb8e7ee08222f879"),
-               ("recipe_2.20bpw.yaml", 21484, "fc08aed44aa0cc993b53aaff36cc98dba2a1aa81fc5055812568e1c086d0872d"),
-               ("recipe_3.00bpw.yaml", 21487, "d977b2198b21721ae0e42667d89e2eb8107c15b8a8a3c3b16fe618d8f7e14353"),
-               ("recipe_4.00bpw.yaml", 21487, "0b4a5b64580cbc3abf3d08d0bea1f526c50c6d5738c638f41288595069cec3b4"),
-               ("recipe_5.00bpw.yaml", 21486, "1736b92c76728bb865fc38ed8a929dc6c21b077066fcb7815decfe20e5ccaad2"),
-               ("recipe_6.00bpw.yaml", 21486, "a95a52fb59b3976ee615c02df6f68efa758af95def6a519c8a4848b4964cd9c4"),
-               ("rfn_2.00bpw.json", 85427, "e66a8173c003f2b7e7fe89b7c10d6b0064a6ab1798078eedcf7d9b8555fa31c3"),
-               ("tokenizer.json", 12809320, "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3"),
-               ("tokenizer_config.json", 17928, "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27"),
-               ("video_preprocessor_config.json", 385, "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"),
-               ("vocab.json", 6722759, "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003")]},
     {"label": "Qwen3.8-27B EXL3 1.75 bits per weight (turboderp; EXL3 engine, experimental)", "kind": "dir",
      "repo": "turboderp/Qwen3.8-27B-exl3", "rev": "2c1a38c2de43eab08cc8fba99656dc488e698cfb", "subdir": "turboderp__Qwen3.8-27B-exl3__SCP_1.75bpw", "needs": "exl3",
      "new": "2026-11-26",
@@ -228,17 +188,15 @@ DOWNLOADS = [
 # EXL3 (EXPERIMENTAL, still being tested): EXL3 models run on TabbyAPI + exllamav3, installed by install-exl3.sh into
 # ~/exl3. A folder is an EXL3 model when its config.json says quant_method "exl3"; the tested ones are told apart by their
 # first weights file (name:size). K/V cache 4-bit (cache_mode 4,4), MTP draft 2 tokens, prompt chunks of 2,048 (the lab's
-# settings). The lab's first tests (an RTX 4090 Laptop, no cap, 11-26): 2.00 bpw with MTP off peaked at 8,410 MiB at 32k
-# tokens and 8,990 at 64k (about 18 MiB per 1,000 tokens); its MTP head took ~330-370 MiB more; 1.75 bpw at 80k peaked at
-# 8,470 (7,988 once loaded). So on a real 8 GB card (~7,800 MiB usable) 2.00 bpw does not fit, and 1.75 bpw fits about
-# 36k tokens with MTP off, 16k with it on: ESTIMATES from those numbers, not measured under an 8 GB cap.
+# settings). Measured by the lab (RTX 4090 Laptop, 11-26, engine VRAM per process): 1.75 bpw at 81,920 tokens peaked at
+# 8,470 MiB with MTP off, K/V 4,4 takes 18.06 KiB per token, and the MTP head (draft 2) 390 MiB more; so it fits 8 GB at
+# about 57,344 tokens with MTP off (the lab's figure, chunk 2048; ~70k with chunk 512) and 34,816 with MTP on (57,344
+# minus the head's 390 MiB). MTP is on by default (writing 21.9 vs 16.8 t/s). 2.00 bpw is not offered: it fits 8 GB only
+# at about 6k tokens.
 EXL3_HOME = os.environ.get("EXL3_HOME") or os.path.join(HOME, "exl3")
 EXL3_RECOMMENDED = {
-    "model-00001-of-00002.safetensors:8570690830": {"label": "Qwen3.8-27B EXL3 2.00 bpw", "ctx": {}, "draft_n": 2, "cache_mode": "4,4",
-        "note": "Too big for an 8 GB card in the lab's first test: 8,410 MiB of GPU memory at 32k tokens with MTP off. "
-                "The 1.75 bpw folder is the one for this laptop."},
-    "model-00001-of-00002.safetensors:8587658013": {"label": "Qwen3.8-27B EXL3 1.75 bpw", "ctx": {"mtp_off": 36864, "mtp_on": 16384},
-                                                    "draft_n": 2, "cache_mode": "4,4"},
+    "model-00001-of-00002.safetensors:8587658013": {"label": "Qwen3.8-27B EXL3 1.75 bpw", "ctx": {"mtp_off": 57344, "mtp_on": 34816},
+                                                    "mtp_default": True, "draft_n": 2, "cache_mode": "4,4"},
 }
 # (the system prompt is prompts/v1-1.md, delivered by plugins/system-prompt.js; kit.json says which plugins a session gets)
 
@@ -681,14 +639,18 @@ def choose_exl3(st, model):
     if info["mtp"]:
         print(f"\n{B}MTP{N} (a built-in draft head that makes generation faster).")
         on, off = ctxs.get("mtp_on"), ctxs.get("mtp_off")
-        if on and off: print(f"   {D}Estimated for an 8 GB card: about {on:,} tokens with MTP on, {off:,} with it off.{N}")
-        mtp = yes("Use MTP?", default=mem.get("mtp", bool(on) and (not off or on >= 0.9 * off)))
+        if on and off: print(f"   {D}For an 8 GB card, from the lab's measurements: about {on:,} tokens with MTP on, {off:,} with it off.{N}")
+        default = mem.get("mtp", rec.get("mtp_default", bool(on) and (not off or on >= 0.9 * off)))
+        if st.get("_mtp_failed", {}).get(model["name"]):     # it just failed to start with MTP on: suggest it off
+            default = False
+            print(f"   {D}It did not start with MTP on just now: MTP off leaves more room.{N}")
+        mtp = yes("Use MTP?", default=default)
     key = f"engine=exl3,mtp={'on' if mtp else 'off'}"
     suggested = ctxs.get("mtp_on" if mtp else "mtp_off")
     last = st.get("_tried", {}).get(f"{model['name']}|{key}") or mem.get("ctx", {}).get(key)
     native = info.get("native")
     print(f"\n{B}Context{N} (how many tokens the model can keep in view at once).")
-    if suggested: print(f"   Estimated for an 8 GB card from the lab's first tests: {suggested:,} (not measured on 8 GB yet: if it does not fit, try less)")
+    if suggested: print(f"   Worked out from the lab's measurements for an 8 GB card: {suggested:,} (not run on her card yet: if it does not fit, try less)")
     else: print("   No number for this model: enter one (if it does not fit, the server will say so)")
     if last: print(f"   You used {last:,} last time.")
     while True:
@@ -842,6 +804,14 @@ def _subst(v):
     if isinstance(v, list): return [_subst(x) for x in v]
     if isinstance(v, dict): return {k: _subst(x) for k, x in v.items()}
     return v
+
+
+def opencode_env(cfg_content):
+    """The environment for the opencode this launcher starts: its session config, and no per-response output cap
+    (opencode caps a response at 32,000 tokens unless OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX says more; the model
+    entry's output limit is the whole context, as in the tests, so a long answer ends only when the model stops or the
+    context is full)."""
+    return dict(os.environ, OPENCODE_CONFIG_CONTENT=cfg_content, OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX="1048576")
 
 
 def kit_setups(kit=None):
@@ -1409,6 +1379,15 @@ def choose(st, model, ask_ctx=True):
         # leave enough system RAM free
         cheap = bool(on) and (not off or on >= 0.9 * off)
         default = mem.get("mtp", cheap or not rec)
+        # llm-tune's fit test on this machine: MTP on did not fit (the GPU, or system RAM) but MTP off did -> off
+        t_on, t_off = (tuned_for(f"{model['name']}|{setting_key(model['name'], m, mem.get('images_gpu', False), proj)}") for m in (True, False))
+        if t_on and not t_on.get("suggested") and t_off and t_off.get("suggested"):
+            default = False
+            print(f"   {R}Measured on this machine (llm-tune): with MTP on it does not fit{N} ({t_on.get('note') or 'not even at 4,096 tokens'});"
+                  f" with MTP off it holds {t_off['suggested']:,} tokens. MTP off is suggested.")
+        if st.get("_mtp_failed", {}).get(model["name"]):     # it just failed to start with MTP on: suggest it off
+            default = False
+            print(f"   {D}It did not start with MTP on just now: MTP off leaves more room.{N}")
         if moe and ram[True]["short"] and not ram[False]["short"]:
             default = False
             print(f"   {R}With MTP on there is not enough free RAM now{N} ({gib(ram[True]['avail'])} free, about "
@@ -1489,7 +1468,7 @@ def attach(port):
     st = load_state()
     sid = choose_setup(st)
     prov = update_opencode_config(mid, f"{name} ({ctx // 1000}k)", ctx, port)
-    env = dict(os.environ, OPENCODE_CONFIG_CONTENT=session_config(prov, sid))
+    env = opencode_env(session_config(prov, sid))
     print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}")
     print(f"   opencode setup: {setup_of(sid).get('name')}  {D}(kit.json){N}\n")
     return subprocess.call([opencode_bin(), "-m", f"{PROVIDER}/{mid}"], env=env)
@@ -1550,17 +1529,18 @@ def main():
         ok = wait_ready(p, port, timeout=1800 if exl else 600) and warm_up(port, c.get("engine")) and p.poll() is None
         if not ok:
             stop_server(p)
+            if c["mtp"]: st.setdefault("_mtp_failed", {})[model["name"]] = True
             if exl: explain_exl3_failure(log, c)
             else: explain_failure(log, c["mtp"], c["proj"], c["proj_gpu"], model)
             if yes("\nTry again with different settings?", default=True): continue
             sys.exit(1)
         print("   ready.")
-        st.pop("_tried", None)                     # it worked: remember these settings for this model
+        st.pop("_tried", None); st.pop("_mtp_failed", None)      # it worked: remember these settings for this model
         mem = st.setdefault("models", {}).setdefault(model["name"], {})
         mem["mtp"] = c["mtp"]; mem["images_gpu"] = c["proj_gpu"]; mem.setdefault("ctx", {})[c["key"]] = c["ctx"]
         save_state(st)
         prov = update_opencode_config(mid, f"{model['name']} ({c['ctx'] // 1000}k)", c["ctx"], port)
-        env = dict(os.environ, OPENCODE_CONFIG_CONTENT=session_config(prov, sid))
+        env = opencode_env(session_config(prov, sid))
         print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}  {D}(server log: {log}){N}")
         print(f"   opencode setup: {setup_of(sid).get('name')}  {D}(kit.json){N}\n")
         time.sleep(1)

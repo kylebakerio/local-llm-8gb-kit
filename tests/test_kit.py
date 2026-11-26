@@ -263,15 +263,15 @@ class TestEXL3(unittest.TestCase):
 
     def test_found_as_an_exl3_model_and_matched_to_its_tested_settings(self):
         with tempfile.TemporaryDirectory() as t, mock.patch.object(L, "DEFAULT_DIRS", [t]), mock.patch.object(L, "hf_cache", lambda: os.path.join(t, "none")):
-            self.make(os.path.join(t, "turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw"))
+            self.make(os.path.join(t, "turboderp__Qwen3.8-27B-exl3__SCP_1.75bpw"), size=8587658013)
             with open(os.path.join(t, "config.json"), "w") as f: json.dump({"model_type": "llama"}, f)      # not EXL3: ignored
             ms = [m for m in L.scan_models({}) if m.get("engine") == "exl3"]
             self.assertEqual(len(ms), 1)
             m = ms[0]
-            self.assertTrue(m["exl3"]["mtp"]); self.assertEqual(m["exl3"]["bits"], 2.0)
-            rec = L.EXL3_RECOMMENDED[m["exl3"]["sig"]]          # 2.00 bpw: too big for 8 GB in the lab's first test
-            self.assertEqual(rec["ctx"], {}); self.assertIn("Too big", rec["note"])
-            self.assertEqual(L.EXL3_RECOMMENDED["model-00001-of-00002.safetensors:8587658013"]["ctx"], {"mtp_off": 36864, "mtp_on": 16384})
+            self.assertTrue(m["exl3"]["mtp"])
+            # the lab's measured 8 GB fit: 57,344 with MTP off, minus the head's 390 MiB at 18.06 KiB/token with it on
+            self.assertEqual(L.EXL3_RECOMMENDED[m["exl3"]["sig"]]["ctx"], {"mtp_off": 57344, "mtp_on": 34816})
+            self.assertNotIn("model-00001-of-00002.safetensors:8570690830", L.EXL3_RECOMMENDED)      # 2.00 bpw: dropped
 
     def test_tabby_config_is_the_lab_layout(self):
         m = {"path": "/m/turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw/", "name": "x"}
@@ -288,12 +288,14 @@ class TestEXL3(unittest.TestCase):
         m = {"name": "x", "exl3": {"sig": "none", "bits": 2.0, "mtp": False, "native": 262144}}
         with mock.patch.object(L, "ask", lambda *a, **k: "40000"):
             self.assertEqual(L.choose_exl3(st, m)["ctx"], 39936)
-        # 1.75 bpw: MTP costs more than half the context on 8 GB, so the default is off, and the context follows the choice
+        # 1.75 bpw: MTP on by default, at the context that fits with the head; after an MTP-on start failure, off
         m = {"name": "y", "exl3": {"sig": "model-00001-of-00002.safetensors:8587658013", "bits": 1.75, "mtp": True, "native": 262144}}
         asked = []
         with mock.patch.object(L, "yes", lambda q, default=True: asked.append(default) or default), mock.patch.object(L, "ask", lambda q, default=None: default):
             c = L.choose_exl3({}, m)
-        self.assertEqual((asked, c["mtp"], c["ctx"]), ([False], False, 36864))
+            self.assertEqual((asked, c["mtp"], c["ctx"]), ([True], True, 34816))
+            c = L.choose_exl3({"_mtp_failed": {"y": True}}, m)
+            self.assertEqual((asked[-1], c["mtp"], c["ctx"]), (False, False, 57344))
 
     def test_health_accepts_tabbys_answer(self):
         import http.server, threading
@@ -308,7 +310,7 @@ class TestEXL3(unittest.TestCase):
 
     def test_exl3_downloads_are_whole_pinned_folders(self):
         ds = [d for d in L.DOWNLOADS if d.get("kind") == "dir"]
-        self.assertEqual(len(ds), 2)
+        self.assertEqual([d["subdir"] for d in ds], ["turboderp__Qwen3.8-27B-exl3__SCP_1.75bpw"])     # 2.00 bpw dropped
         for d in ds:
             names = {f[0] for f in d["files"]}
             self.assertTrue({"config.json", "model-00001-of-00002.safetensors", "tokenizer.json"} <= names)
@@ -326,6 +328,74 @@ class TestRamSignals(unittest.TestCase):
         try: self.assertEqual(T.majflt(4242, path), 77)
         finally: os.remove(path)
         self.assertIsNone(T.majflt(-1, "/nonexistent/stat"))
+
+
+class TestMtpFallback(unittest.TestCase):
+    """MTP stays on by default for the 35B-A3B models; when the fit test finds MTP on does not fit on this machine (the
+    GPU or system RAM), it measures MTP off right after, and the launcher then suggests MTP off."""
+    QWEN = "Qwen_Qwen3.6-35B-A3B-IQ3_XXS.gguf"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tuned = os.path.join(self.tmp.name, "tuned.json")
+        self.m = {"path": "/x/" + self.QWEN, "name": self.QWEN, "size": 1, "dir": "/x", "repo": "t"}
+        self.s_on = {"mtp": True, "draft_n": 1, "proj": None, "proj_gpu": False}
+        self.k_on, self.k_off = L.setting_key(self.QWEN, True, False), L.setting_key(self.QWEN, False, False)
+
+    def tearDown(self): self.tmp.cleanup()
+
+    def fake_tune(self, calls, fit_on):
+        def f(server, m, s, k, idx, gname, what, redo):
+            calls.append(k)
+            rec = ({"max_ctx": 90112, "suggested": 88064} if (fit_on or not s["mtp"]) else
+                   {"max_ctx": 0, "suggested": 0, "note": "not enough free system RAM", "ram": {"short_mib": 700}})
+            T.save(f"{m['name']}|{k}", rec); return rec
+        return f
+
+    def test_mtp_on_that_does_not_fit_is_followed_by_mtp_off(self):
+        calls = []
+        with mock.patch.object(T, "TUNED", self.tuned), mock.patch.object(T, "tune_one", self.fake_tune(calls, False)):
+            T.run_todo("srv", [(self.m, self.s_on, self.k_on)], "0", "gpu", "fit", True)
+        self.assertEqual(calls, [self.k_on, self.k_off])
+
+    def test_no_fallback_when_mtp_on_fits_or_off_is_queued(self):
+        calls = []
+        with mock.patch.object(T, "TUNED", self.tuned), mock.patch.object(T, "tune_one", self.fake_tune(calls, True)):
+            T.run_todo("srv", [(self.m, self.s_on, self.k_on)], "0", "gpu", "fit", True)
+        self.assertEqual(calls, [self.k_on])
+        calls = []
+        with mock.patch.object(T, "TUNED", self.tuned), mock.patch.object(T, "tune_one", self.fake_tune(calls, False)):
+            T.run_todo("srv", [(self.m, self.s_on, self.k_on), (self.m, dict(self.s_on, mtp=False), self.k_off)], "0", "gpu", "fit", True)
+        self.assertEqual(calls, [self.k_on, self.k_off])                  # measured once, in its own place
+
+    def test_launcher_defaults_mtp_on_and_falls_back_to_off_from_the_fit(self):
+        tuned = {}
+        asked = []
+        def run():
+            with mock.patch.object(L, "gguf_meta", lambda p, *a: {"nextn_predict_layers": 1, "context_length": 262144}), \
+                 mock.patch.object(L, "projector_for", lambda m: None), mock.patch.object(L, "load_tuned", lambda: tuned), \
+                 mock.patch.object(L, "ram_check", lambda *a, **k: {"need": 10000, "avail": 14000, "short": 0}), \
+                 mock.patch.object(L, "yes", lambda q, default=True: asked.append(default) or default):
+                return L.choose({}, self.m, ask_ctx=False)
+        self.assertTrue(run()["mtp"])                                     # nothing measured here: MTP on (the tested default)
+        tuned[f"{self.QWEN}|{self.k_on}"] = {"max_ctx": 0, "suggested": 0, "note": "not enough free system RAM"}
+        tuned[f"{self.QWEN}|{self.k_off}"] = {"max_ctx": 90112, "suggested": 88064}
+        self.assertFalse(run()["mtp"])                                    # llm-tune: MTP on does not fit, MTP off does
+        self.assertEqual(asked, [True, False])
+
+
+class TestOutputCap(unittest.TestCase):
+    def test_no_per_response_output_cap(self):
+        """opencode caps a response at 32,000 tokens unless OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX lifts it (the lab's
+        no-output-cap rule): the launcher lifts it, and the model entry's output limit is the whole context."""
+        env = L.opencode_env('{"x": 1}')
+        self.assertEqual(env["OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"], "1048576")
+        self.assertEqual(env["OPENCODE_CONFIG_CONTENT"], '{"x": 1}')
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(L, "OC_CONFIG", os.path.join(t, "opencode.json")):
+            prov = L.update_opencode_config("m", "m", 88064, 8080)
+        self.assertEqual(prov["models"]["m"]["limit"], {"context": 88064, "input": 88064, "output": 88064})
+        src = open(os.path.join(KIT, "llm-launch.py")).read()
+        self.assertEqual(src.count("subprocess.call([opencode_bin()"), src.count("env=env)"))   # every opencode start gets that env
 
 
 if __name__ == "__main__":

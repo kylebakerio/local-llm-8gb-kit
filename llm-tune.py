@@ -570,6 +570,34 @@ def settings_for(model):
     return out
 
 
+def run_todo(server, todo, idx, gname, what, redo):
+    """Measure each (model, setting, key) in turn. A setting with MTP on that does not fit (in the GPU, or in system
+    RAM) falls back to MTP off: that setting is measured right after it, unless it is already measured or queued.
+    Returns the heat records that came out moderate or heavy."""
+    queue, done, hot = list(todo), set(), []
+    i = 0
+    while i < len(queue):
+        m, s, k = queue[i]; i += 1
+        if len(queue) > 1: print(f"\n{D}[{i} of {len(queue)}]{N}", end="")
+        try:
+            rec = tune_one(server, m, s, k, idx, gname, what, redo)
+        except Exception as e:
+            stop(); print(f"{R}   {m['name']} ({L.setting_label(k)}) stopped with an error: {e}{N}"); continue
+        done.add((m["name"], k))
+        if ((rec or {}).get("heat") or {}).get("severity") in ("moderate", "heavy"): hot.append(rec["heat"])
+        if s.get("mtp") and rec is not None and not rec.get("max_ctx"):
+            k_off = L.setting_key(m["name"], False, s.get("proj_gpu"), s.get("proj"))
+            off = load_tuned().get(f"{m['name']}|{k_off}")
+            later = any(x[0]["name"] == m["name"] and x[2] == k_off for x in queue[i:])
+            if (m["name"], k_off) in done or later: continue
+            if needs(off, "fit")[0]:
+                print(f"   {B}MTP on does not fit here, so the fit test tries MTP off next{N} (the launcher then suggests MTP off)")
+                queue.insert(i, (m, dict(s, mtp=False), k_off))
+            elif off and off.get("suggested"):
+                print(f"   MTP on does not fit here; MTP off was measured before ({off['suggested']:,} tokens): the launcher suggests it")
+    return hot
+
+
 WHAT = {"f": "fit", "s": "speed", "b": "both"}
 
 
@@ -653,14 +681,7 @@ def main():
         todo = [(model, {"mtp": c["mtp"], "draft_n": c["draft_n"], "proj": c["proj"], "proj_gpu": c["proj_gpu"]}, c["key"])]
         redo = True                                     # one model picked by hand: measure it (again)
     t0 = time.time()
-    hot = []
-    for n, (m, s, k) in enumerate(todo, 1):
-        if len(todo) > 1: print(f"\n{D}[{n} of {len(todo)}]{N}", end="")
-        try:
-            rec = tune_one(server, m, s, k, idx, gname, what, redo)
-            if ((rec or {}).get("heat") or {}).get("severity") in ("moderate", "heavy"): hot.append(rec["heat"])
-        except Exception as e:
-            stop(); print(f"{R}   {m['name']} ({L.setting_label(k)}) stopped with an error: {e}{N}")
+    hot = run_todo(server, todo, idx, gname, what, redo)
     print(f"\n{B}All measurements on this machine{N}  ({round((time.time() - t0) / 60)} min this run; also: llm-launch --results, or r at its model menu)")
     print("\n".join(L.results_table()))
     print(f"{D}Saved in {TUNED}{N}")

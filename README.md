@@ -30,7 +30,8 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
 - **The task driver is now your choice, and off by default.** At each start the launcher asks: *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* It remembers your answer for the next time. This is a newer version, 0.4.1, than the one the kit had before. See *What the launcher changes*.
 - **`llm-tune` runs the fit test and the speed test separately.** For any model you can run either one. The fit test now also checks system RAM.
-- **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to under 2 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
+- **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to 1.75 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
+- **No cap on the length of one answer.** opencode normally cuts an answer off at 32,000 tokens. The launcher lifts that, as in our tests, so an answer ends only when the model stops or the context is full.
 
 ## One-time setup
 
@@ -163,10 +164,11 @@ Gemma 4 26B-A4B, Qwen 3.6 35B-A3B and Ornith 1.5 35B-A3B are bigger than the car
 - The launcher shows the need and what is free before it starts.
 - When only MTP on would be short of RAM, it suggests MTP off.
 - `llm-tune`'s fit test checks RAM first, and watches for RAM running short while the context is full.
+- **MTP stays on by default.** If `llm-tune`'s fit test finds that MTP on does not fit on this laptop, in the GPU or in RAM, it measures MTP off right after. The launcher then suggests MTP off for that model.
 
 ### EXL3 models (experimental)
 
-EXL3 is a different way of packing a model into fewer bits, run by a different engine: TabbyAPI with exllamav3, instead of llama.cpp. At about 2 bits per weight it puts the main weights of Qwen3.8-27B, a dense 27B model, on the card: about 6.2 GB at 2.00 bits and 5.4 GB at 1.75. The download is bigger, since it also holds parts that stay off the card, such as the image part. **It is experimental: our tests of it are still running, and none of its numbers below were measured on an 8 GB card yet.**
+EXL3 is a different way of packing a model into fewer bits, run by a different engine: TabbyAPI with exllamav3, instead of llama.cpp. At 1.75 bits per weight it puts the main weights of Qwen3.8-27B, a dense 27B model, on the card: about 5.4 GB. The download is bigger, since it also holds parts that stay off the card, such as the image part. **It is experimental: our tests of it are still running, and none of its numbers below were measured on an 8 GB card yet.**
 
 - **Install the engine** (about 5 GB to download, 9 GB on disk, into `~/exl3`): `bash install-exl3.sh`, or say yes when `setup.sh` asks.
   - It gets Python 3.12 through uv, so nothing on the system changes.
@@ -174,15 +176,17 @@ EXL3 is a different way of packing a model into fewer bits, run by a different e
   - It needs git and NVIDIA driver 570 or newer.
 - **Get a model** from the launcher's download menu (`d`). Each one is a folder of files, every file checked:
 
-  | Model | Download | On 8 GB, from the lab's first tests (on another card, estimated) |
+  | Model | Download | Context that fits 8 GB (measured by the lab on another laptop GPU) |
   |---|---|---|
-  | Qwen3.8-27B EXL3, 1.75 bits per weight | 9.0 GB | about 36,000 tokens with MTP off, 16,000 with it on |
-  | Qwen3.8-27B EXL3, 2.00 bits per weight | 9.9 GB | too big: 8,410 MiB of GPU memory at 32,000 tokens, with MTP off |
+  | Qwen3.8-27B EXL3, 1.75 bits per weight | 9.0 GB | about 57,000 tokens with MTP off; about 35,000 with MTP on |
 
-  Use the 1.75 bits-per-weight folder on this laptop. In that first test the model wrote 17 tokens/s at short context with MTP off, and 22 with MTP on, on a faster laptop GPU.
+  - The MTP-on number is the measured MTP-off fit, minus the 390 MiB the MTP head took.
+  - The 2.00 bits-per-weight version fits 8 GB only at about 6,000 tokens, too little for coding, so the kit doesn't offer it.
+  - With MTP on, the model wrote about 22 tokens/s at short context; with it off, 17. That was on a faster laptop GPU.
 
-- **The launcher** finds EXL3 model folders like the other models, and marks them *EXL3, experimental*.
-  - It asks about MTP (a draft of 2 tokens) and the context, starts TabbyAPI, and opens opencode on it, with the same plugins as the other models. On 8 GB, MTP costs more than half the context, so it is off by default.
+- **The launcher** finds EXL3 model folders like the other models, and marks them *EXL3, experimental*. `llm-tune` cannot measure EXL3 models yet, so this launch is the test of what fits.
+  - It asks about MTP (a draft of 2 tokens) and the context, starts TabbyAPI, and opens opencode on it, with the same plugins as the other models.
+  - MTP is on by default, at the context that leaves room for its head. If the engine does not start with MTP on, the launcher suggests MTP off and the larger context for the next try.
   - The K/V cache is 4-bit, and sampling follows the model's own settings: temperature 1.0, top-p 0.95, top-k 20.
   - If the context does not fit, the launcher shows TabbyAPI's error. Try a smaller one.
 - **Not covered yet:** `llm-tune` measures llama.cpp models only, LL-Dash has no profiles for EXL3, and `llm-launch --attach` does not work with it.
@@ -373,6 +377,7 @@ The Uncensored Bonsai 2.5 edit runs with Bonsai 2.5's settings.
     - the original request again, word for word;
     - a task checklist that marks each item of the request as done, in progress, or not started. The model is asked to make its todo list match it.
   - Each time a session is summarized, the plugin also saves the whole conversation so far to a text file in `~/.local/share/opencode/history/`.
+  - **No cap on the length of one answer** (`OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`). The model entry's output limit is the whole context.
 - **With the task driver turned on,** the session gets a different set:
   - the same v1.1 system prompt;
   - the **task driver** (`plugins/opencode-task-driver-0.4.1.js`, focus mode). When a request holds several separate problems, it has the model file them as tasks, and works them one at a time, each on a clean slate with a short handoff from the tasks before. After a summary it brings back the current task, and it handles the turn after the summary itself. A single-problem request runs as one task.

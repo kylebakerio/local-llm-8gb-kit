@@ -112,7 +112,7 @@ say "7. Optional, experimental: the EXL3 engine"
 if [ -f "${EXL3_HOME:-$HOME/exl3}/INSTALLED" ]; then
     bash "$KIT/install-exl3.sh" || echo "   the EXL3 engine needs an update and it did not finish: run  bash $KIT/install-exl3.sh"
 else
-    echo "   A second engine, for EXL3 models (Qwen3.8-27B at 2 bits per weight). It is experimental: our tests of it are"
+    echo "   A second engine, for EXL3 models (Qwen3.8-27B at 1.75 bits per weight). It is experimental: our tests of it are"
     echo "   still running. About 5 GB to download, 9 GB on disk, into ~/exl3. The rest of the kit works without it."
     read -r -p "   Install the EXL3 engine? [y/N] " a
     if [[ "$a" =~ ^[Yy] ]]; then bash "$KIT/install-exl3.sh" || echo "   not installed; run  bash $KIT/install-exl3.sh  to try again"
