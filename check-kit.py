@@ -1,51 +1,127 @@
 #!/usr/bin/env python3
 """Check kit.json before pushing a change to it (for whoever maintains this kit; the launcher does not need it).
 
-    python3 check-kit.py            the plugins and files it names exist, prompt texts pass the rules below
+    python3 check-kit.py            the setups, the plugins and files they name, the prompt texts (rules below)
     python3 check-kit.py --fetch    also download each url plugin and compare its sha256
 
-Rules: every plugin has a 'file' in this repo or a 'url' with a 'sha256'; every {kit}/... path in plugin options exists;
-a prompt text (any .md / .txt file an option names) never mentions how it was tested ("codebench", "benchmark"),
-since the model reads it. A changed prompt text needs a new file name: the setup name then tells the sessions apart.
+Rules:
+  - kit.json has setup, setup_version, opencode and setups; exactly one setup is the default; ids are unique; every
+    non-default setup has an 'ask' text (the launcher's yes / no question).
+  - Every plugin has a 'file' in this repo (with a 'sha256' it must match) or a 'url' with a 'sha256'; every {kit}/...
+    path in plugin options exists.
+  - A prompt text (any .md / .txt file an option names) never mentions how it was tested ("codebench", "benchmark"),
+    since the model reads it; nor does any option value. system-prompt.js uses its file exactly as it is, so the text has
+    no leading or trailing whitespace (the tested text is stripped), and matches its 'prompt_sha256'.
+  - Each setup is a combination the test harness runs (it refuses the others):
+      * at most one plugin replaces opencode's own prompt (compaction-anchor's "slim" part, system-prompt.js);
+      * at most one replaces opencode's turn after a summary (system-prompt.js with continueText, compaction-anchor's
+        "no-stop-and-ask", a task driver: it handles that turn itself);
+      * a task driver runs alone or with system-prompt.js only: no compaction-anchor parts, focus mode;
+      * each plugin appears once.
+A changed prompt text needs a new file name: the setup name then tells the sessions apart.
 """
 import hashlib, json, os, re, sys, urllib.request
 
 KIT = os.path.dirname(os.path.abspath(__file__))
 BANNED = re.compile(r"codebench|benchmark", re.I)
+ANCHOR_PARTS = ("checklist", "reinsert", "pointer", "no-stop-and-ask", "slim")
+
+
+def read(path, binary=False):
+    with open(path, "rb") if binary else open(path, encoding="utf-8") as f: return f.read()
+
+
+def kind(p):
+    """compaction-anchor / system-prompt / task-driver / other, from the plugin's file or url."""
+    src = os.path.basename(p.get("file") or p.get("url") or "")
+    if "compaction-anchor" in src or "session-history" in src: return "compaction-anchor"
+    if "system-prompt" in src: return "system-prompt"
+    if "task-driver" in src: return "task-driver"
+    return "other"
+
+
+def check_plugin(p, fetch, bad, sha_cache):
+    name = p.get("name", "?")
+    if p.get("file"):
+        path = os.path.join(KIT, p["file"])
+        if not os.path.isfile(path): bad.append(f"{name}: no file {p['file']}")
+        elif not p.get("sha256"): bad.append(f"{name}: a file plugin needs its sha256 (the tested build)")
+        elif hashlib.sha256(read(path, True)).hexdigest() != p["sha256"]:
+            bad.append(f"{name}: {p['file']} does not match its sha256")
+    elif p.get("url") and p.get("sha256"):
+        if fetch and p["url"] not in sha_cache:
+            sha_cache[p["url"]] = hashlib.sha256(urllib.request.urlopen(p["url"], timeout=60).read()).hexdigest()
+        if fetch and sha_cache[p["url"]] != p["sha256"]: bad.append(f"{name}: the download does not match its sha256")
+    else:
+        bad.append(f"{name}: needs 'file' (+ 'sha256'), or 'url' and 'sha256'")
+    for v in re.findall(r'"(\{kit\}/[^"]+)"', json.dumps(p.get("options") or {})):
+        path = v.replace("{kit}", KIT)
+        if not os.path.exists(path): bad.append(f"{name}: option path {v} does not exist")
+        elif path.endswith((".md", ".txt")):
+            text = read(path)
+            if BANNED.search(text): bad.append(f"{name}: {v} mentions the benchmark (the model reads this text)")
+            if kind(p) == "system-prompt" and v == (p.get("options") or {}).get("file"):
+                if text != text.lstrip("﻿").strip():
+                    bad.append(f"{name}: {v} has leading or trailing whitespace (system-prompt.js sends it as it is; the tested text is stripped)")
+                if p.get("prompt_sha256") and hashlib.sha256(text.encode("utf-8")).hexdigest() != p["prompt_sha256"]:
+                    bad.append(f"{name}: {v} does not match its prompt_sha256 (a changed text needs a new file name)")
+    for v in re.findall(r'"([^"]*)"', json.dumps(p.get("options") or {})):
+        if BANNED.search(v): bad.append(f"{name}: an option mentions the benchmark: {v[:60]}")
+
+
+def check_setup(s, bad):
+    """The combination rules (see the module doc) for one setup."""
+    sid = s.get("id", "?")
+    ps = s.get("plugins") or []
+    kinds = [kind(p) for p in ps]
+    for k in set(kinds):
+        if kinds.count(k) > 1: bad.append(f"setup {sid}: {k} appears {kinds.count(k)} times")
+    anchor = [p for p in ps if kind(p) == "compaction-anchor"]
+    parts = set(((anchor[0].get("options") or {}).get("parts") or []) if anchor else [])
+    if anchor and not (anchor[0].get("options") or {}).get("parts"):
+        bad.append(f"setup {sid}: compaction-anchor without a parts list (its defaults include parts no test used)")
+    for x in sorted(parts - set(ANCHOR_PARTS)): bad.append(f"setup {sid}: compaction-anchor has no part {x!r}")
+    sp = [p for p in ps if kind(p) == "system-prompt"]
+    td = [p for p in ps if kind(p) == "task-driver"]
+    cont = bool(sp and (sp[0].get("options") or {}).get("continueText"))
+    if sp and not (sp[0].get("options") or {}).get("file"): bad.append(f"setup {sid}: system-prompt.js needs its file option")
+    if sp and cont and not str(sp[0]["options"]["continueText"]).strip(): bad.append(f"setup {sid}: an empty continueText")
+    if "slim" in parts and sp: bad.append(f"setup {sid}: the slim part and system-prompt.js both replace opencode's prompt: keep one")
+    turn = [x for x, on in (("system-prompt.js continueText", cont), ("compaction-anchor no-stop-and-ask", "no-stop-and-ask" in parts),
+                            ("a task driver", bool(td))) if on]
+    if len(turn) > 1: bad.append(f"setup {sid}: {' and '.join(turn)} would both replace the turn after a summary: keep one")
+    if td and anchor: bad.append(f"setup {sid}: a task driver runs without the compaction-anchor parts (it handles compaction itself)")
+    if td and (td[0].get("options") or {}).get("mode", "focus") != "focus": bad.append(f"setup {sid}: the task driver runs in focus mode only")
+    other = [p.get("name", "?") for p in ps if kind(p) == "other"]
+    if other: bad.append(f"setup {sid}: plugins no tested setup used: {', '.join(other)}")
+
+
+def check(kit, fetch=False):
+    """The list of problems with a kit.json object ([] = ok)."""
+    bad = []
+    for key in ("setup", "setup_version", "opencode", "setups"):
+        if key not in kit: bad.append(f"kit.json has no '{key}'")
+    if "plugins" in kit: bad.append("kit.json has a top-level 'plugins' list: plugins go inside a setup")
+    sets = kit.get("setups") or []
+    defaults = [s for s in sets if s.get("default")]
+    if len(defaults) != 1: bad.append(f"kit.json needs exactly one default setup (has {len(defaults)})")
+    elif kit.get("setup") != defaults[0].get("name"): bad.append("kit.json 'setup' is not the default setup's name")
+    ids = [s.get("id") for s in sets]
+    if len(set(ids)) != len(ids) or not all(ids): bad.append("every setup needs its own id")
+    sha_cache = {}
+    for s in sets:
+        if not s.get("default") and not s.get("ask"): bad.append(f"setup {s.get('id')}: needs an 'ask' text (the launcher's question)")
+        if not s.get("name"): bad.append(f"setup {s.get('id')}: needs a name")
+        for p in s.get("plugins") or []: check_plugin(p, fetch, bad, sha_cache)
+        check_setup(s, bad)
+    return bad
 
 
 def main():
-    kit = json.load(open(os.path.join(KIT, "kit.json")))
-    bad = []
-    for key in ("setup", "setup_version", "opencode", "plugins"):
-        if key not in kit: bad.append(f"kit.json has no '{key}'")
-    for p in kit.get("plugins", []):
-        name = p.get("name", "?")
-        if p.get("file"):
-            path = os.path.join(KIT, p["file"])
-            if not os.path.isfile(path): bad.append(f"{name}: no file {p['file']}")
-            elif p.get("sha256") and hashlib.sha256(open(path, "rb").read()).hexdigest() != p["sha256"]:
-                bad.append(f"{name}: {p['file']} does not match its sha256")
-        elif p.get("url") and p.get("sha256"):
-            if "--fetch" in sys.argv:
-                data = urllib.request.urlopen(p["url"], timeout=60).read()
-                if hashlib.sha256(data).hexdigest() != p["sha256"]: bad.append(f"{name}: the download does not match its sha256")
-        else:
-            bad.append(f"{name}: needs 'file', or 'url' and 'sha256'")
-        for v in re.findall(r'"(\{kit\}/[^"]+)"', json.dumps(p.get("options") or {})):
-            path = v.replace("{kit}", KIT)
-            if not os.path.exists(path): bad.append(f"{name}: option path {v} does not exist")
-            elif path.endswith((".md", ".txt")) and BANNED.search(open(path, encoding="utf-8").read()):
-                bad.append(f"{name}: {v} mentions the benchmark (the model reads this text)")
-    for v in re.findall(r'"([^"]*)"', json.dumps([p.get("options") for p in kit.get("plugins", [])])):
-        if BANNED.search(v): bad.append(f"a plugin option mentions the benchmark: {v[:60]}")
-    # opencode's own prompt can be replaced once: the slim part and a system-prompt plugin together were never tested
-    # (the test harness refuses that pair)
-    slim = [p for p in kit.get("plugins", []) if "slim" in ((p.get("options") or {}).get("parts") or [])]
-    prompt = [p for p in kit.get("plugins", []) if "system-prompt" in (p.get("file") or p.get("url") or "")]
-    if slim and prompt: bad.append("the slim part and a system-prompt plugin both replace opencode's prompt: keep one")
+    kit = json.loads(read(os.path.join(KIT, "kit.json")))
+    bad = check(kit, "--fetch" in sys.argv)
     for line in bad: print("FAIL", line)
-    if not bad: print(f"ok: {kit.get('setup')} ({len(kit.get('plugins', []))} plugins)")
+    if not bad: print("ok: " + "; ".join(f"{s['id']}: {s['name']} ({len(s.get('plugins', []))} plugins)" for s in kit["setups"]))
     return 1 if bad else 0
 
 

@@ -210,5 +210,44 @@ class TestDownloads(unittest.TestCase):
             self.assertFalse(L.get_download(d, {}))
 
 
+C = load("check_kit", "check-kit.py")
+
+
+class TestCheckKit(unittest.TestCase):
+    """check-kit.py accepts the two tested plugin sets and refuses every other combination of these plugins."""
+    A = {"file": "plugins/compaction-anchor.js", "options": {"parts": ["checklist", "reinsert"]}}
+    SP_CONT = {"file": "plugins/system-prompt.js", "options": {"file": "{kit}/prompts/v1-1.md", "continueText": "Continue with the task."}}
+    SP = {"file": "plugins/system-prompt.js", "options": {"file": "{kit}/prompts/v1-1.md"}}
+    TD = {"file": "plugins/opencode-task-driver-0.4.1.js", "options": {"mode": "focus"}}
+
+    def bad(self, *plugins):
+        out = []; C.check_setup({"id": "x", "plugins": list(plugins)}, out); return out
+
+    def test_the_two_tested_sets_pass(self):
+        self.assertEqual(self.bad(self.A, self.SP_CONT), [])          # standard: v1.1 + continue text + checklist + reinsert
+        self.assertEqual(self.bad(self.SP, self.TD), [])              # task driver: v1.1 without the continue text + the driver
+
+    def test_other_combinations_are_refused(self):
+        slim = {"file": "plugins/compaction-anchor.js", "options": {"parts": ["slim"]}}
+        nsa = {"file": "plugins/compaction-anchor.js", "options": {"parts": ["checklist", "no-stop-and-ask"]}}
+        for combo in [(slim, self.SP), (self.SP_CONT, self.TD), (self.A, self.SP, self.TD), (self.A, self.TD),
+                      (nsa, self.SP_CONT), (self.SP, self.SP_CONT), (dict(self.TD, options={"mode": "tasks"}), self.SP),
+                      (self.SP, {"file": "plugins/something-else.js"}), ({"file": "plugins/compaction-anchor.js"}, self.SP_CONT)]:
+            self.assertTrue(self.bad(*combo), [p.get("options") for p in combo])
+
+    def test_this_kit_passes(self):
+        with open(os.path.join(KIT, "kit.json")) as f: self.assertEqual(C.check(json.load(f)), [])
+
+    def test_a_prompt_with_a_trailing_newline_is_refused(self):
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(C, "KIT", t):
+            os.makedirs(os.path.join(t, "prompts")); os.makedirs(os.path.join(t, "plugins"))
+            for f, text in (("prompts/p.md", "A prompt.\n"), ("plugins/system-prompt.js", "x")):
+                with open(os.path.join(t, f), "w") as fh: fh.write(text)
+            import hashlib
+            p = {"name": "sp", "file": "plugins/system-prompt.js", "sha256": hashlib.sha256(b"x").hexdigest(), "options": {"file": "{kit}/prompts/p.md"}}
+            out = []; C.check_plugin(p, False, out, {})
+            self.assertTrue(any("whitespace" in x for x in out), out)
+
+
 if __name__ == "__main__":
     unittest.main()

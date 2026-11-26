@@ -1,36 +1,47 @@
 {
   "_about": [
-    "What llm-launch gives opencode in its sessions: the plugins (with their options) and the opencode settings.",
+    "What llm-launch gives opencode in its sessions: the tested plugin sets (setups, with their options) and the opencode settings.",
     "A new tested setup is an edit here plus a push; llm-launch offers the update at its next start on each machine.",
     "setup_version: raise it when setup.sh gains a step every machine must run (a new llama.cpp build, say); opencode: the",
     "version these plugins were tested with. After an update, the launcher offers to run setup.sh when either one moved on.",
-    "Plugin source: 'file' = a file in this repo, or 'url' + 'sha256' = downloaded once into ~/.config/llm-launch/plugins/",
-    "(kept only if the checksum matches). In option values, {kit} is this folder and {state} is ~/.config/llm-launch.",
-    "A replacement system prompt is a plugin too: a prompt file in prompts/, passed to its plugin as an option. A changed",
-    "prompt text gets a new file name, so each session can be matched to the tested setup it ran.",
-    "Only one plugin may replace opencode's own prompt: moving to a system-prompt plugin means removing the slim entry",
-    "(and tools.skill: false with it, if the tested setup kept the skill tool).",
+    "setups: the first with default true is used unless the person turns another on; every other setup is a yes / no",
+    "question at each start (its 'ask' text), the answer remembered. 'setup' (top level) is the default setup's name.",
+    "Plugin source: 'file' = a file in this repo (with 'sha256': it must match), or 'url' + 'sha256' = downloaded once into",
+    "~/.config/llm-launch/plugins/ (kept only if the checksum matches). In option values, {kit} is this folder and {state}",
+    "is ~/.config/llm-launch. A replacement system prompt is a text file in prompts/, passed to plugins/system-prompt.js as",
+    "its 'file' option (used exactly as it is: no trailing newline; 'prompt_sha256' pins it). A changed prompt text gets a",
+    "new file name, so each session can be matched to the tested setup it ran.",
+    "Only one plugin may replace opencode's own prompt (compaction-anchor's slim part or system-prompt.js), and only one may",
+    "replace the turn after a summary (system-prompt.js continueText, compaction-anchor's no-stop-and-ask, or a task driver,",
+    "which handles that turn itself); a task driver runs without the compaction-anchor parts. check-kit.py enforces these.",
     "Before pushing a change here: python3 check-kit.py --fetch"
   ],
-  "setup": "slim + task driver 0.3.1",
+  "setup": "v1.1 prompt + checklist + reinsert",
   "setup_version": 1,
   "opencode": "1.18.34",
-  "plugins": [
+  "setups": [
     {
-      "name": "compaction-anchor (slim part: short system prompt, shorter tool descriptions)",
-      "file": "plugins/compaction-anchor.js",
-      "options": {"parts": ["slim"]}
-    },
-    {
-      "name": "task driver 0.3.1 (focus mode)",
-      "url": "https://github.com/kylebakerio/opencode-task-driver/releases/download/v0.3.1/opencode-task-driver.js",
-      "sha256": "07e7c273a4bc389a04b348f1f03ca1873859da98e2b9246a4fd4c880272f64eb",
-      "save_as": "opencode-task-driver-0.3.1.js",
-      "options": {"mode": "focus"}
+      "id": "standard",
+      "default": true,
+      "name": "v1.1 prompt + checklist + reinsert",
+      "plugins": [
+        {
+          "name": "compaction-anchor (checklist + reinsert: after a summary, a task checklist and the original request word for word)",
+          "file": "plugins/compaction-anchor.js",
+          "sha256": "07cf81670923db1ce5a258924556b0b77bdfeb49a7ee7ca395004e3c1baa856a",
+          "options": {"parts": ["checklist", "reinsert"]}
+        },
+        {
+          "name": "system prompt v1.1 (in place of opencode's own instructions; \"Continue with the task.\" after a summary)",
+          "file": "plugins/system-prompt.js",
+          "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
+          "prompt_sha256": "bdd1391138981fcc4b3008f877fa2d28983f61c2e2c9beee3510f2e9dec9cf02",
+          "options": {"file": "{kit}/prompts/v1-1.md", "continueText": "Continue with the task."}
+        }
+      ]
     }
   ],
   "opencode_config": {
-    "tools": {"skill": false},
     "compaction": {"reserved": 22528}
   }
 }
