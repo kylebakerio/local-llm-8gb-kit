@@ -16,8 +16,9 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 ### 1. Keep the NVIDIA GPU free for the model
 
 Run the desktop on the Intel graphics, so all 8 GB on the NVIDIA card is free for the model.
-- Use the top-bar menu: **Graphics: Hybrid**.
-- Or run `system76-power graphics hybrid` in a terminal.
+- **Compute** mode is best: the NVIDIA card then runs only the model. Choose **Graphics: Compute** in the top-bar menu, or run `system76-power graphics compute` in a terminal.
+- **Hybrid** mode is fine too. Use it if an external monitor stops working in Compute mode.
+- Only **NVIDIA** mode is a problem. In it, the desktop itself takes some of the card's memory. `setup.sh` offers to switch you to Compute.
 
 Then reboot and check:
 
@@ -59,7 +60,7 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
   - **For Bonsai 2.5 27B, use the PTQ1_0 file.** That is the 8 GB fit, and the same goes for Bonsai 2 27B. The PQ2_0 and Q2_0 files hold the same weights in 7.3 and 7.7 GB, and leave far less room for context, or none. If you don't have PTQ1_0, get it from the launcher: choose `d`. It is 6 GB, plus its 0.6 GB image file.
   - Get more models later from the launcher: choose `d` at its model menu.
 
-To get updates later: `cd ~/local-llm-8gb-kit && git pull`.
+**Updates:** at each start, `llm-launch` checks GitHub for a newer kit and asks before it updates. A newer kit can bring new plugin versions, or a system prompt that did better in our tests. To update by hand, run `llm-launch --update`. If an update also needs a setup step, such as a new opencode version, it offers to run `setup.sh` for you. Your settings and `llm-tune`'s measurements are kept.
 
 **Use Bonsai 2.5 27B (the PTQ1_0 file) for real coding work.**
 - In our coding tests on this 8 GB setup, it and Bonsai 2 27B each fixed 11 of 14 real bugs. The 9B models fixed 2 or 3. The details are under *What was measured*.
@@ -246,7 +247,7 @@ The test conditions:
 - **The 9B models:** both are far behind.
   - Bonsai 2 9B usually finished within minutes with a fix that didn't work.
   - Ornith often repeated itself without changing anything until it was stopped.
-- **Speed:** each model ran half its bugs on the RTX 3060 and half on an RTX 4090 Laptop, also held to 8 GB. Her card's speed falls between the two.
+- **Speed:** each model ran half its bugs on the RTX 3060 and half on an RTX 4090 Laptop, also held to 8 GB. Her laptop measured slower than both (see *On her laptop*), so her runs will take longer.
 - **Plugins:** the tests used an earlier version of the compaction plugin in place of the task driver, and ran the 27B models at 90,112 tokens of context; the launcher suggests 88,064. A test of the launcher's exact plugin setup is running, and this section will be updated with what it shows.
 
 Every model runs with its makers' recommended sampling settings, which the launcher sets itself:
@@ -261,7 +262,7 @@ Every model runs with its makers' recommended sampling settings, which the launc
 ## What the launcher changes on your machine
 
 - **`~/.config/opencode/opencode.json`:** it adds the model under a `llama-local` provider, with its context limit. The file is backed up once, to `opencode.json.bak-llm-launch`.
-- **The opencode sessions it starts also get the following,** which is not saved in your opencode config. Opening opencode yourself gives you stock opencode, with these models available.
+- **The opencode sessions it starts also get the following,** which is not saved in your opencode config. Opening opencode yourself gives you stock opencode, with these models available. The list comes from `kit.json`, and a kit update can change it. The launcher prints the current setup's name as opencode starts.
   - The **task driver** ([opencode-task-driver](https://github.com/kylebakerio/opencode-task-driver) 0.3.1, focus mode):
     - When a request holds several separate problems, it has the model file them as tasks.
     - It works them one at a time, each on a clean slate with a short handoff from the tasks before.
@@ -270,5 +271,5 @@ Every model runs with its makers' recommended sampling settings, which the launc
   - **A short system prompt** in place of opencode's long built-in one. Your project's `AGENTS.md` instructions are kept.
   - **Shorter tool descriptions.**
   - **The `skill` tool turned off.**
-- **`~/.config/llm-launch/`:** your choices, and the two plugin files.
+- **`~/.config/llm-launch/`:** your choices, downloaded plugins, and `llm-tune`'s measurements.
 - **`~/.cache/llm-launch/`:** the model server's logs.

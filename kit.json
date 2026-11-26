@@ -1,0 +1,36 @@
+{
+  "_about": [
+    "What llm-launch gives opencode in its sessions: the plugins (with their options) and the opencode settings.",
+    "A new tested setup is an edit here plus a push; llm-launch offers the update at its next start on each machine.",
+    "setup_version: raise it when setup.sh gains a step every machine must run (a new llama.cpp build, say); opencode: the",
+    "version these plugins were tested with. After an update, the launcher offers to run setup.sh when either one moved on.",
+    "Plugin source: 'file' = a file in this repo, or 'url' + 'sha256' = downloaded once into ~/.config/llm-launch/plugins/",
+    "(kept only if the checksum matches). In option values, {kit} is this folder and {state} is ~/.config/llm-launch.",
+    "A replacement system prompt is a plugin too: a prompt file in prompts/, passed to its plugin as an option. A changed",
+    "prompt text gets a new file name, so each session can be matched to the tested setup it ran.",
+    "Only one plugin may replace opencode's own prompt: moving to a system-prompt plugin means removing the slim entry",
+    "(and tools.skill: false with it, if the tested setup kept the skill tool).",
+    "Before pushing a change here: python3 check-kit.py --fetch"
+  ],
+  "setup": "slim + task driver 0.3.1",
+  "setup_version": 1,
+  "opencode": "1.18.34",
+  "plugins": [
+    {
+      "name": "compaction-anchor (slim part: short system prompt, shorter tool descriptions)",
+      "file": "plugins/compaction-anchor.js",
+      "options": {"parts": ["slim"]}
+    },
+    {
+      "name": "task driver 0.3.1 (focus mode)",
+      "url": "https://github.com/kylebakerio/opencode-task-driver/releases/download/v0.3.1/opencode-task-driver.js",
+      "sha256": "07e7c273a4bc389a04b348f1f03ca1873859da98e2b9246a4fd4c880272f64eb",
+      "save_as": "opencode-task-driver-0.3.1.js",
+      "options": {"mode": "focus"}
+    }
+  ],
+  "opencode_config": {
+    "tools": {"skill": false},
+    "compaction": {"reserved": 22528}
+  }
+}

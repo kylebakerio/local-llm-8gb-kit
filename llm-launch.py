@@ -2,7 +2,9 @@
 """llm-launch: run a local model on an 8 GB NVIDIA laptop GPU and open opencode on it.
 
     python3 llm-launch.py            (run it from the project folder you want opencode to work in)
-    python3 llm-launch.py --fetch-plugins  download the task-driver plugin (setup.sh does this; so does the first launch)
+    python3 llm-launch.py --update         get the latest kit from GitHub (new plugins, a new tested setup); the launcher
+                                           also checks at each start and asks (--no-update skips that)
+    python3 llm-launch.py --fetch-plugins  get the plugins kit.json names (setup.sh does this; so does each launch)
     python3 llm-launch.py --add-dir DIR    also look for models in DIR
     python3 llm-launch.py --results        the measurements llm-tune saved on this machine (context that fits, speed)
     python3 llm-launch.py --inventory      find the models this kit tested anywhere in your home folder, say what is known
@@ -21,12 +23,13 @@ then it adds the model to your opencode config, starts llama-server, and starts 
 opencode, it stops the server.
 
 Server settings that match the tested setup: q4_0 K/V cache, all layers on the GPU, flash attention, one request at a
-time, the model's own recommended sampling. opencode gets two plugins for these sessions: the task driver
-(opencode-task-driver 0.3.1, focus mode: splits a request with several problems into tasks and works them one at a time,
-each on a clean slate) and the "slim" part of the compaction-anchor plugin (a short system prompt in place of opencode's
-long one, shorter tool descriptions; your project's AGENTS.md is kept).
-Files it writes: ~/.config/llm-launch/ (your choices, the plugin), ~/.cache/llm-launch/ (server logs), and the model
-entry in ~/.config/opencode/opencode.json (a backup is kept next to it the first time).
+time, the model's own recommended sampling. opencode gets the plugins and settings kit.json names, for these sessions
+only. Today: the task driver (opencode-task-driver 0.3.1, focus mode: splits a request with several problems into tasks
+and works them one at a time, each on a clean slate) and the "slim" part of the compaction-anchor plugin
+(plugins/compaction-anchor.js: a short system prompt in place of opencode's long one, shorter tool descriptions; your
+project's AGENTS.md is kept). A newer tested setup arrives as a kit update (--update).
+Files it writes: ~/.config/llm-launch/ (your choices, downloaded plugins, llm-tune's measurements), ~/.cache/llm-launch/
+(server logs), and the model entry in ~/.config/opencode/opencode.json (a backup is kept next to it the first time).
 Python 3.8+, standard library only.
 """
 import glob, json, os, re, shutil, signal, socket, struct, subprocess, sys, time, urllib.request
@@ -34,17 +37,14 @@ import glob, json, os, re, shutil, signal, socket, struct, subprocess, sys, time
 HOME = os.path.expanduser("~")
 STATE_DIR = os.path.join(HOME, ".config", "llm-launch")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
-PLUGIN_FILE = os.path.join(STATE_DIR, "compaction-anchor.js")
-# the task driver, published at github.com/kylebakerio/opencode-task-driver (release v0.3.1), checked by its sha256
-TD_VERSION = "0.3.1"
-TD_URL = f"https://github.com/kylebakerio/opencode-task-driver/releases/download/v{TD_VERSION}/opencode-task-driver.js"
-TD_SHA256 = "07e7c273a4bc389a04b348f1f03ca1873859da98e2b9246a4fd4c880272f64eb"
-TD_FILE = os.path.join(STATE_DIR, f"opencode-task-driver-{TD_VERSION}.js")
+KIT = os.path.dirname(os.path.abspath(__file__))
+KIT_JSON = os.path.join(KIT, "kit.json")           # the opencode setup for these sessions: plugins, options, settings
+PLUGIN_DIR = os.path.join(STATE_DIR, "plugins")    # downloaded plugins (checked by sha256)
+SETUP_VERSION_FILE = os.path.join(STATE_DIR, "setup_version")   # the kit.json setup_version setup.sh last ran for
 LOG_DIR = os.path.join(HOME, ".cache", "llm-launch")
 OC_CONFIG = os.path.join(HOME, ".config", "opencode", "opencode.json")
 PROVIDER = "llama-local"
 KV = "q4_0"                 # K/V cache type used in every tested number below
-RESERVE = 22528             # opencode's compaction reserve in the tests (tokens kept free for the model's next step)
 DEFAULT_PORT = 8080
 
 # Tested on an RTX 3060 held to exactly what an 8 GB RTX 3070 Laptop offers (8192 MiB minus the driver's reservation
@@ -86,7 +86,7 @@ DOWNLOADS = [
     ("ornith-ai/Ornith-1.5-9B-GGUF", "Ornith-1.5-9B-Q4_K_M.gguf", None),
     ("prism-ml/Ternary-Bonsai-2-9B-gguf", "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf", "Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"),
 ]
-# (the short system prompt lives in the plugin below: PLUGIN_SRC, its SLIM_PROMPT)
+# (the short system prompt lives in plugins/compaction-anchor.js, its SLIM_PROMPT; kit.json says which plugins a session gets)
 
 B = "\033[1m" if sys.stdout.isatty() else ""
 D = "\033[2m" if sys.stdout.isatty() else ""
@@ -310,8 +310,8 @@ def explain_failure(log, mtp, proj, proj_gpu):
     print("   a) use a smaller context")
     if mtp: print("   b) turn MTP off (it needs its own memory on the GPU)")
     if proj and proj_gpu: print("   c) process images on the CPU instead of the GPU")
-    print("   - and check nothing else is using the GPU: run  nvidia-smi  (the desktop should be on the Intel graphics,\n"
-          "     see README.md)")
+    print("   - and check nothing else is using the GPU:")
+    for line in gpu_busy_advice("     "): print(line)
 
 
 # ------------------------------------------------------------------ opencode
@@ -393,49 +393,197 @@ def update_opencode_config(mid, label, ctx, port):
     return prov
 
 
-def fetch_task_driver(quiet=False):
-    """The task-driver plugin file, downloaded once from its GitHub release and checked against TD_SHA256. None if it
-    cannot be had (no network): the session then runs without it, and says so."""
+def load_kit():
+    """kit.json: the opencode setup this kit's sessions use (its plugins with their options, and opencode settings)."""
+    with open(KIT_JSON) as f: return json.load(f)
+
+
+def _sha256(path):
     import hashlib
-    def ok(path):
-        try:
-            with open(path, "rb") as f: return hashlib.sha256(f.read()).hexdigest() == TD_SHA256
-        except OSError: return False
-    if ok(TD_FILE): return TD_FILE
-    os.makedirs(STATE_DIR, exist_ok=True)
-    tmp = TD_FILE + ".part"
     try:
-        if not quiet: print(f"   downloading the task-driver plugin {TD_VERSION} from GitHub ...")
-        with urllib.request.urlopen(TD_URL, timeout=60) as r, open(tmp, "wb") as fh: fh.write(r.read())
-        if not ok(tmp):
-            os.remove(tmp); print(f"{R}   the downloaded task-driver plugin does not match its checksum; not used{N}"); return None
-        os.replace(tmp, TD_FILE); return TD_FILE
+        with open(path, "rb") as f: return hashlib.sha256(f.read()).hexdigest()
+    except OSError: return None
+
+
+def plugin_path(p, quiet=False):
+    """The local file of one kit.json plugin: a file in this kit, or a download (once, into ~/.config/llm-launch/plugins/)
+    kept only if it matches its sha256. None if it cannot be had (no network): the session then runs without it."""
+    if p.get("file"):
+        path = os.path.join(KIT, p["file"])
+        if os.path.isfile(path) and (not p.get("sha256") or _sha256(path) == p["sha256"]): return path
+        print(f"{R}   the plugin file {path} is missing or changed{N}"); return None
+    dest = os.path.join(PLUGIN_DIR, p.get("save_as") or os.path.basename(p["url"]))
+    if _sha256(dest) == p["sha256"]: return dest
+    os.makedirs(PLUGIN_DIR, exist_ok=True)
+    old = os.path.join(STATE_DIR, os.path.basename(dest))          # where versions before kit.json kept it
+    if _sha256(old) == p["sha256"]:
+        os.replace(old, dest); return dest
+    tmp = dest + ".part"
+    try:
+        if not quiet: print(f"   downloading the plugin: {p['name']} ...")
+        with urllib.request.urlopen(p["url"], timeout=60) as r, open(tmp, "wb") as fh: fh.write(r.read())
+        if _sha256(tmp) != p["sha256"]:
+            os.remove(tmp); print(f"{R}   the downloaded plugin ({p['name']}) does not match its checksum; not used{N}")
+            return None
+        os.replace(tmp, dest); return dest
     except Exception as e:
-        print(f"{R}   could not download the task-driver plugin ({e}); this session runs without it{N}")
+        print(f"{R}   could not download the plugin {p['name']} ({e}){N}")
         return None
 
 
+def _subst(v):
+    """{kit} and {state} in kit.json option values: this kit's folder, ~/.config/llm-launch."""
+    if isinstance(v, str): return v.replace("{kit}", KIT).replace("{state}", STATE_DIR)
+    if isinstance(v, list): return [_subst(x) for x in v]
+    if isinstance(v, dict): return {k: _subst(x) for k, x in v.items()}
+    return v
+
+
+def fetch_plugins(kit=None, quiet=False):
+    """[(plugin, local path or None)] for every plugin kit.json names."""
+    kit = kit or load_kit()
+    return [(p, plugin_path(p, quiet)) for p in kit.get("plugins", [])]
+
+
 def session_config(prov):
-    """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the task driver
-    (focus mode) and the compaction-anchor plugin's "slim" part (opencode's long built-in instructions swapped for a
-    short prompt -- your project's AGENTS.md is kept -- and the longest tool descriptions shortened); the skill tool off;
-    the compaction reserve used in the tests; and the model entry (in case opencode.json could not be edited)."""
-    write_plugin()
-    plugins = [["file://" + PLUGIN_FILE, {"parts": ["slim"]}]]
-    td = fetch_task_driver()
-    if td: plugins.append(["file://" + td, {"mode": "focus"}])
-    return json.dumps({
-        "provider": {PROVIDER: prov},
-        "plugin": plugins,
-        "tools": {"skill": False},
-        "compaction": {"reserved": RESERVE},
-    })
+    """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the plugins and
+    settings kit.json names (today: the task driver in focus mode, and the compaction-anchor plugin's "slim" part --
+    opencode's long built-in instructions swapped for a short prompt, your project's AGENTS.md kept, the longest tool
+    descriptions shortened -- the skill tool off, and the compaction reserve used in the tests), plus the model entry
+    (in case opencode.json could not be edited)."""
+    kit = load_kit()
+    plugins = []
+    for p, path in fetch_plugins(kit):
+        if path: plugins.append(["file://" + path, _subst(p.get("options") or {})])
+        else: print(f"{R}   this session runs without: {p['name']}{N}")
+    cfg = {"provider": {PROVIDER: prov}, "plugin": plugins}
+    cfg.update(_subst(kit.get("opencode_config") or {}))
+    return json.dumps(cfg)
 
 
-def write_plugin():
-    os.makedirs(STATE_DIR, exist_ok=True)
-    if not os.path.exists(PLUGIN_FILE) or open(PLUGIN_FILE).read() != PLUGIN_SRC:
-        with open(PLUGIN_FILE, "w") as f: f.write(PLUGIN_SRC)
+# ------------------------------------------------------------------ kit updates (git pull from GitHub)
+def _git(*args, timeout=30):
+    return subprocess.run(["git", "-C", KIT, *args], capture_output=True, text=True, timeout=timeout,
+                          env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+
+
+def kit_is_clone():
+    return os.path.isdir(os.path.join(KIT, ".git")) and shutil.which("git") is not None
+
+
+def updates_waiting(timeout=8):
+    """The changes on GitHub this copy of the kit does not have yet (their one-line descriptions, newest first): [] when
+    it is up to date, None when it could not check (offline, not a git clone)."""
+    if not kit_is_clone(): return None
+    try:
+        if _git("fetch", "--quiet", timeout=timeout).returncode: return None
+        r = _git("log", "--format=%s", "HEAD..@{u}")
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return [s for s in r.stdout.split("\n") if s] if r.returncode == 0 else None
+
+
+def update(ask_first=False, changes=None):
+    """Bring the kit up to date (git pull --ff-only), then restart this script, so the rest runs on the new code:
+    post_update() says what changed and gets the plugins the new kit.json names. False if nothing was updated."""
+    if not kit_is_clone():
+        print(f"{R}This copy of the kit is not a git clone, so it cannot update itself.{N} Clone it again (README.md)."); return False
+    if changes is None:
+        changes = updates_waiting(timeout=30)
+        if changes is None: print(f"{R}Could not reach GitHub to check for updates.{N}"); return False
+    if not changes:
+        print("The kit is up to date."); return False
+    print(f"{B}A kit update is available{N} ({len(changes)} change{'s' if len(changes) > 1 else ''}):")
+    for s in changes[:12]: print(f"   - {s}")
+    if len(changes) > 12: print(f"   ... and {len(changes) - 12} more")
+    if ask_first and not yes("Update now?", default=True): return False
+    head = _git("rev-parse", "--short", "HEAD").stdout.strip()
+    setup = (load_kit().get("setup") or "")
+    r = _git("pull", "--ff-only", "--quiet", timeout=180)
+    if r.returncode:
+        print(f"{R}The update did not apply:{N}")
+        for line in (r.stderr or r.stdout).strip().splitlines()[-6:]: print(f"   {line}")
+        print(f"   Usually that means files in the kit folder were changed on this machine. See which:  git -C {KIT} status\n"
+              f"   To set those changes aside and update:  git -C {KIT} stash && llm-launch --update")
+        return False
+    args = sys.argv[1:]                            # with --update: post_update() runs, then it stops there
+    os.environ["LLM_LAUNCH_UPDATED_FROM"] = json.dumps([head, setup])
+    sys.stdout.flush()
+    os.execv(sys.executable, [sys.executable, os.path.join(KIT, "llm-launch.py")] + args)
+
+
+def post_update():
+    """Right after update() restarted this script: what changed, the new plugins, and whatever else the new kit needs."""
+    try: head, setup = json.loads(os.environ.pop("LLM_LAUNCH_UPDATED_FROM"))
+    except (KeyError, ValueError): return False
+    kit = load_kit()
+    print(f"   updated: {head} -> {_git('rev-parse', '--short', 'HEAD').stdout.strip()}")
+    if kit.get("setup") != setup: print(f"   opencode setup: {setup} -> {B}{kit.get('setup')}{N}")
+    for p, path in fetch_plugins(kit):
+        if not path: print(f"{R}   missing: {p['name']} (the launcher tries again at each start){N}")
+    check_setup(kit)
+    print()
+    return True
+
+
+def check_setup(kit=None):
+    """The kit's one-time setup or its opencode version moved on since this machine last ran setup.sh: offer to run it."""
+    kit = kit or load_kit()
+    try: done = int(open(SETUP_VERSION_FILE).read().strip())
+    except (OSError, ValueError): done = 1                # setup.sh from before it recorded this: version 1
+    want = kit.get("setup_version", 1)
+    oc = opencode_bin()
+    have_oc = ""
+    if oc:
+        try: have_oc = subprocess.run([oc, "--version"], capture_output=True, text=True, timeout=30).stdout.strip()
+        except Exception: pass
+    why = []
+    if want > done: why.append("the kit's one-time setup has new steps")
+    if kit.get("opencode") and have_oc != kit["opencode"]:
+        why.append(f"this setup was tested with opencode {kit['opencode']} (you have {have_oc or 'none'})")
+    if not why: return True
+    print(f"{B}Setup:{N} " + "; ".join(why) + ".")
+    if not yes("Run setup.sh now (it skips what is already done)?", default=True):
+        print(f"   Later:  bash {os.path.join(KIT, 'setup.sh')}"); return False
+    return subprocess.call(["bash", os.path.join(KIT, "setup.sh"), "--no-launch"]) == 0
+
+
+# ------------------------------------------------------------------ the graphics mode, and what else uses the GPU
+def graphics_mode():
+    """Pop!_OS's graphics mode (system76-power): compute / hybrid / nvidia / integrated; None elsewhere."""
+    if not shutil.which("system76-power"): return None
+    try: return subprocess.run(["system76-power", "graphics"], capture_output=True, text=True, timeout=10).stdout.strip() or None
+    except Exception: return None
+
+
+def gpu_users():
+    """[(pid, name, MiB)]: the programs computing on the NVIDIA GPU now (nvidia-smi's compute apps)."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=15).stdout
+    except Exception:
+        return []
+    rows = []
+    for line in out.strip().splitlines():
+        f = [x.strip() for x in line.split(",")]
+        if len(f) == 3 and f[0].isdigit(): rows.append((int(f[0]), os.path.basename(f[1]), int(f[2]) if f[2].isdigit() else 0))
+    return rows
+
+
+def gpu_busy_advice(indent="   "):
+    """Lines that say what else holds GPU memory and what to do about it (for the graphics mode this machine is in)."""
+    lines = []
+    users = gpu_users()
+    if users:
+        lines.append(indent + "Using the GPU now: " + ", ".join(f"{n} (pid {p}, {m:,} MiB)" for p, n, m in users)
+                     + ". Close those, or stop them (kill <pid>).")
+    mode = graphics_mode()
+    if mode == "nvidia":
+        lines.append(indent + "The desktop runs on the NVIDIA card (graphics mode: nvidia), which takes some of its memory. Switch")
+        lines.append(indent + "to Compute: choose Graphics: Compute in the top-bar menu (or: system76-power graphics compute), then reboot.")
+    elif not users:
+        lines.append(indent + "Run  nvidia-smi  to see what is using it.")
+    return lines
 
 
 # ------------------------------------------------------------------ downloads
@@ -687,7 +835,8 @@ def attach(port):
     print(f"Model server on port {port}: {name}, {ctx:,} tokens of context")
     prov = update_opencode_config(mid, f"{name} ({ctx // 1000}k)", ctx, port)
     env = dict(os.environ, OPENCODE_CONFIG_CONTENT=session_config(prov))
-    print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}\n")
+    print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}")
+    print(f"   opencode setup: {load_kit().get('setup')}  {D}(kit.json){N}\n")
     return subprocess.call([opencode_bin(), "-m", f"{PROVIDER}/{mid}"], env=env)
 
 
@@ -703,9 +852,17 @@ def main():
         st = load_state()
         return 0 if add_dir(st, sys.argv[sys.argv.index("--add-dir") + 1]) else 1
     if "--fetch-plugins" in sys.argv:
-        write_plugin(); td = fetch_task_driver()
-        print(f"   plugins ready in {STATE_DIR}" if td else f"{R}   task-driver plugin missing{N}")
-        return 0 if td else 1
+        kit = load_kit(); got = fetch_plugins(kit)
+        for p, path in got: print(f"   {p['name']}: " + (path if path else f"{R}missing{N}"))
+        return 0 if all(path for _, path in got) else 1
+    updated = post_update()                        # only right after an update restarted this script
+    if "--update" in sys.argv:
+        if not updated: update()                   # (restarts this script when it updated)
+        return 0
+    if sys.stdin.isatty() and "--no-update" not in sys.argv:
+        changes = updates_waiting()
+        if changes: update(ask_first=True, changes=changes); print()
+        elif changes is None and kit_is_clone(): print(f"{D}(could not check GitHub for kit updates){N}")
     if "--attach" in sys.argv:
         if not opencode_bin(): print(f"{R}opencode is not installed (bash setup.sh installs it).{N}"); return 1
         port = int(sys.argv[sys.argv.index("--port") + 1]) if "--port" in sys.argv else DEFAULT_PORT
@@ -741,7 +898,8 @@ def main():
         save_state(st)
         prov = update_opencode_config(mid, f"{model['name']} ({c['ctx'] // 1000}k)", c["ctx"], port)
         env = dict(os.environ, OPENCODE_CONFIG_CONTENT=session_config(prov))
-        print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}  {D}(server log: {log}){N}\n")
+        print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}  {D}(server log: {log}){N}")
+        print(f"   opencode setup: {load_kit().get('setup')}  {D}(kit.json){N}\n")
         time.sleep(1)
         try:
             rc = subprocess.call([opencode_bin(), "-m", f"{PROVIDER}/{mid}"], env=env)
@@ -757,340 +915,6 @@ def main():
         return rc
 
 
-# The compaction-anchor plugin with the "slim" part (shorter tool descriptions), exactly as tested.
-PLUGIN_SRC = r'''// Session history for opencode.
-//
-// When opencode summarizes (compacts) a long session, the summary replaces the conversation and details get lost:
-// exact error text, file contents that were read, the wording of the original request, the items not started yet.
-// Each part below can be switched on alone (options.parts); with no list given, "reinsert" and "pointer" are on.
-//   - always: each time a session is summarized, its complete conversation so far (every message, tool call with its
-//     arguments, and tool result in full, oldest first) is written to a readable text file, <dir>/<session id>.md,
-//     rewritten whole from the session store each time.
-//   - "checklist": the summarizer is asked to start the summary with a task checklist -- every item of the original
-//     request (given to it word for word, with the session's todo list) marked done / in progress / not started. The
-//     todo list as it stood at that moment is shown under the summary, then a line asking the model to make its todo
-//     list (todowrite) match the checklist, work from it and check it before it finishes.
-//   - "reinsert": after a summary, the first message starts with the original request, word for word.
-//   - "pointer": the summary ends with one line saying where the full conversation file is.
-//   - "no-stop-and-ask": the automatic turn after a summary reads "Continue with the task."
-//   - "slim": fewer fixed tokens in every request, for a small context window. Unlike the other parts it applies from the
-//     first request. (a) opencode's own general instructions at the top of the system prompt ("You are opencode, an
-//     interactive CLI tool ...", up to the model / environment lines) are replaced by a short prompt; the environment
-//     block and the project's AGENTS.md instructions that follow are kept as they are. (Setting the config's
-//     agent.build.prompt instead also drops AGENTS.md in opencode 1.18.34.) (b) The longest built-in tools (bash,
-//     todowrite, edit, read, webfetch) get shorter descriptions. The skill tool is switched off in the config.
-// Everything except the summarizer's instructions is a view of the context sent to the model: nothing stored changes.
-// Before the first summary nothing else is changed at all.
-//
-// Options (plugin entry [path, {dir, parts}]): dir = where the files go (default ~/.local/share/opencode/history).
-// <dir>/.events.jsonl records what the plugin did (loaded, wrote, asked, shown, errors), one JSON object per line.
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-const TASK_MAX = 32000;      // characters of the original request repeated after a summary
-const PARTS = ["checklist", "reinsert", "pointer", "no-stop-and-ask", "slim"];
-const STOP_ASK = "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.";
-const CONTINUE = "Continue with the task.";
-// "slim": the short system prompt that replaces opencode's own instructions (the project's AGENTS.md is kept).
-const SLIM_PROMPT = [
-  "You are a coding agent working in the user's project through tools.",
-  "- Find and read the relevant code before changing it; follow the project's conventions, style and libraries.",
-  "- Make the change the request asks for, then check it (run the relevant tests, or a quick command that exercises it) before you finish.",
-  "- When the request has several items or steps, keep a todo list (todowrite) and work through it.",
-  "- Use the file tools (read, grep, glob, edit, write) for files and bash for commands.",
-  "- Do not commit or push unless asked.",
-  "- Keep replies short: when done, say what you changed and how you checked it.",
-].join("\n");
-const OC_PROMPT_START = "You are opencode, an interactive CLI tool";
-// where opencode's own instructions end: the first of these that follows them (model line, environment block, instructions)
-const OC_PROMPT_ENDS = ["You are powered by the model named", "Here is some useful information about the environment", "<env>", "Instructions from:"];
-function slimSystem(text) {
-  const i = text.indexOf(OC_PROMPT_START);
-  if (i < 0) return null;
-  const ends = OC_PROMPT_ENDS.map((m) => text.indexOf(m, i + OC_PROMPT_START.length)).filter((j) => j > i);
-  if (!ends.length) return i === 0 ? SLIM_PROMPT : null;     // an element that is opencode's prompt alone: all of it
-  const j = Math.min(...ends);
-  return text.slice(0, i) + SLIM_PROMPT + "\n" + text.slice(j);
-}
-// "slim": the tool descriptions sent to the model (parameters unchanged). Each keeps the rules the original states that
-// change what a call does or returns; usage advice and examples are dropped.
-const SLIM_TOOLS = {
-  bash: "Run a bash command (Linux) for builds, tests, git and other terminal work. Use the workdir parameter instead of " +
-        "`cd dir && command`. Quote paths that contain spaces. Default timeout 120000 ms (set timeout to change it). Output " +
-        "over 2000 lines or 51200 bytes is cut and the full output is saved to a file you can read or grep. Use /tmp/opencode " +
-        "for temporary files outside the workspace. For files use the file tools instead: glob to find, grep to search, read " +
-        "to read, edit or write to change. Only commit or push when asked.",
-  todowrite: "Create or update the todo list for this session (send the whole list each time; each item has content, status " +
-             "pending / in_progress / completed / cancelled, and priority high / medium / low). Use it when the work has three " +
-             "or more steps or the request has several items. Keep exactly one item in_progress; mark an item completed only " +
-             "when its work is done and checked.",
-  edit: "Replace exact text in a file. oldString must match the file exactly, including indentation, without the line-number " +
-        "prefix the read tool adds, and must occur once (or set replaceAll to replace every occurrence). Read the file before " +
-        "editing it.",
-  read: "Read a file (up to 2000 lines from offset, 1-indexed; each line is prefixed `<line>: `; lines over 2000 characters " +
-        "are cut) or list a directory. Use an absolute path. Read a larger window rather than many small slices.",
-  webfetch: "Fetch a web page (a full URL; http is upgraded to https) and return it as markdown (default), text or html. " +
-            "Read-only; very large pages may be summarized.",
-};
-
-export const SessionHistory = async ({ client, directory }, options = {}) => {
-  const dir = String((options && options.dir) || path.join(os.homedir(), ".local", "share", "opencode", "history"));
-  const parts = new Set(Array.isArray(options && options.parts) ? options.parts.filter((x) => PARTS.includes(x)) : ["reinsert", "pointer"]);
-  const todoSnap = new Map();   // session id -> the todo list as it stood at the latest summary (also <dir>/<id>.todos.json)
-  const known = new Map();   // session id -> { task, file } (cached per process)
-  const shown = new Set();   // "<session>:<summary message id>": the first view after each summary is logged once
-  const event = (o) => {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(path.join(dir, ".events.jsonl"), JSON.stringify({ t: Date.now(), ...o }) + "\n");
-    } catch {}
-  };
-  const fileOf = (sid) => path.join(dir, `${sid}.md`);
-  event({ event: "loaded", directory, parts: [...parts] });
-
-  async function messages(sid) {
-    const r = await client.session.messages({ path: { id: sid } });
-    const data = Array.isArray(r) ? r : r && r.data;
-    if (!Array.isArray(data)) throw new Error("could not read the session: " + JSON.stringify((r && r.error) || r).slice(0, 300));
-    return data;
-  }
-
-  // the first request of the session: the text the user typed (parts opencode added itself, such as an attached file's
-  // contents, are marked synthetic and left out)
-  function taskOf(msgs) {
-    for (const m of msgs) {
-      if (m.info.role !== "user" || m.parts.some((p) => p.type === "compaction")) continue;
-      const text = m.parts.filter((p) => p.type === "text" && !p.synthetic && !p.ignored && p.text).map((p) => p.text).join("\n").trim();
-      if (text) return text;
-    }
-    return null;
-  }
-
-  function render(msgs, sid) {
-    const out = [];
-    out.push("# Conversation history", "");
-    out.push(`Session ${sid}. Everything said and done in this conversation up to its most recent summary, oldest first:`);
-    out.push("every message, every tool call with its arguments, and every tool result in full. Rewritten at each summary.", "");
-    let n = 0, calls = 0, summaries = 0;
-    for (const m of msgs) {
-      const role = m.info.role;
-      if (role === "user" && m.parts.some((p) => p.type === "compaction")) continue;   // the summary request itself
-      if (role === "assistant" && m.info.summary === true) {
-        summaries += 1;
-        out.push(`======== conversation summarized here (summary ${summaries}) ========`, "");
-        for (const p of m.parts) if (p.type === "text" && p.text) out.push(p.text.trim(), "");
-        continue;
-      }
-      n += 1;
-      out.push(`======== [${n}] ${role} ========`, "");
-      for (const p of m.parts) {
-        if (p.type === "text" && p.text) {
-          out.push(p.synthetic ? `(added automatically)\n${p.text}` : p.text, "");
-        } else if (p.type === "reasoning" && p.text) {
-          out.push("(thinking)", p.text, "");
-        } else if (p.type === "file") {
-          out.push(`(attached file: ${p.filename || p.url || "file"}${p.mime ? ", " + p.mime : ""})`, "");
-        } else if (p.type === "tool") {
-          calls += 1;
-          const st = p.state || {};
-          out.push(`--- tool call ${calls}: ${p.tool} ---`);
-          for (const [k, v] of Object.entries(st.input || {})) {
-            if (typeof v === "string") out.push(v.includes("\n") ? `${k}:\n${v}` : `${k}: ${v}`);
-            else out.push(`${k}: ${JSON.stringify(v)}`);
-          }
-          if (st.status === "completed") out.push(`--- result of tool call ${calls} ---`, String(st.output ?? ""));
-          else if (st.status === "error") out.push(`--- error from tool call ${calls} ---`, String(st.error ?? ""));
-          else out.push(`--- tool call ${calls} has no result (${st.status || "unknown"}) ---`);
-          out.push("");
-        } else if (p.type === "subtask") {
-          out.push(`(sub-task: ${p.description || p.agent || ""})`, p.prompt || "", "");
-        }
-      }
-    }
-    return { text: out.join("\n") + "\n", messages: n, calls, summaries };
-  }
-
-  async function write(sid, why) {
-    const msgs = await messages(sid);
-    const r = render(msgs, sid);
-    fs.mkdirSync(dir, { recursive: true });
-    const file = fileOf(sid), tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, r.text);
-    fs.renameSync(tmp, file);
-    const task = taskOf(msgs);
-    known.set(sid, { task, file });
-    event({ event: "wrote", why, session: sid, file, bytes: Buffer.byteLength(r.text), messages: r.messages, tool_calls: r.calls,
-            summaries: r.summaries, task_chars: task ? task.length : 0 });
-    return known.get(sid);
-  }
-
-  // what a session needs after a summary; a new process (a later turn of the same session) reads it from the store
-  async function stateOf(sid) {
-    if (known.has(sid)) return known.get(sid);
-    if (fs.existsSync(fileOf(sid))) {
-      const task = taskOf(await messages(sid));
-      known.set(sid, { task, file: fileOf(sid) });
-      return known.get(sid);
-    }
-    return await write(sid, "late");
-  }
-
-  // the session's todo list (opencode's todowrite store). The plugin API can READ it (GET /session/{id}/todo); nothing
-  // in it writes todos -- only the model's own todowrite tool does -- so the list is shown, never changed.
-  async function todosOf(sid) {
-    const r = await client.session.todo({ path: { id: sid } });
-    const data = Array.isArray(r) ? r : r && r.data;
-    return Array.isArray(data) ? data.map((t) => ({ content: String(t.content || ""), status: String(t.status || ""), priority: String(t.priority || "") })) : [];
-  }
-  const todoLines = (todos) => todos.map((t) => `- [${t.status}] ${t.content}`).join("\n");
-  function snapOf(sid) {
-    if (todoSnap.has(sid)) return todoSnap.get(sid);
-    let todos = [];
-    try { todos = JSON.parse(fs.readFileSync(path.join(dir, `${sid}.todos.json`), "utf8")).todos || []; } catch {}
-    todoSnap.set(sid, todos);
-    return todos;
-  }
-  function checklistAsk(task, todos) {
-    const out = [
-      "Additional requirement for this summary, which takes precedence over the template above: start the summary with a section \"## Task checklist\", placed before \"## Objective\"; every other section follows as the template says.",
-      "- One line for every distinct task, issue or requirement in the original request below, in the request's order, using the request's own numbering when it has one. A request that asks for a single thing gets a one-line checklist.",
-      "- Begin each line with its status: [done], [in progress] or [not started]. Never leave an item out: an item with no recorded work is [not started], whether or not the conversation or an earlier summary mentions it.",
-      "- For a [done] item, add one short piece of evidence on the same line (the change made, or the check that passed).",
-    ];
-    if (todos.length) out.push("- The session's todo list is below. Use it as evidence of progress; the checklist still follows the original request.");
-    out.push("", "<original-request>", task.length > TASK_MAX ? task.slice(0, TASK_MAX) + "\n[...]" : task, "</original-request>");
-    if (todos.length) out.push("", "<todo-list>", todoLines(todos), "</todo-list>");
-    return out.join("\n");
-  }
-
-  const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
-  const textOf = (m) => m.parts.filter((p) => p.type === "text" && !p.synthetic && p.text).map((p) => p.text).join("\n");
-
-  const slimmed = new Set();
-  let promptSlims = 0, promptMisses = 0;
-  return {
-    "experimental.chat.system.transform": async (input, output) => {
-      if (!parts.has("slim") || !output || !Array.isArray(output.system)) return;
-      let done = false;
-      for (let k = 0; k < output.system.length; k++) {
-        const t = output.system[k];
-        if (typeof t !== "string" || !t.includes(OC_PROMPT_START)) continue;
-        const n = slimSystem(t);
-        if (n === null) continue;
-        output.system[k] = n; done = true;
-        if (promptSlims++ === 0) event({ event: "slimmed", what: "system", chars_before: t.length, chars_after: n.length, session: input && input.sessionID });
-        break;
-      }
-      // a request that carries opencode's own prompt but could not be slimmed (its text changed): say so once
-      if (!done && output.system.some((t) => typeof t === "string" && t.includes(OC_PROMPT_START)) && promptMisses++ === 0)
-        event({ event: "error", where: "slim-system", error: "opencode's prompt is there but its end was not found; left as it is" });
-    },
-    "tool.definition": async (input, output) => {
-      if (!parts.has("slim")) return;
-      const d = SLIM_TOOLS[input && input.toolID];
-      if (!d) return;
-      const before = String((output && output.description) || "").length;
-      output.description = d;
-      if (!slimmed.has(input.toolID)) { slimmed.add(input.toolID); event({ event: "slimmed", tool: input.toolID, chars_before: before, chars_after: d.length }); }
-    },
-    "experimental.session.compacting": async (input, output) => {
-      const sid = input.sessionID;
-      let st = null;
-      try { st = await write(sid, "summary"); }
-      catch (e) { event({ event: "error", where: "write", session: sid, error: String((e && e.stack) || e).slice(0, 600) }); }
-      if (!parts.has("checklist")) return;
-      try {
-        let todos = [];
-        try { todos = await todosOf(sid); }
-        catch (e) { event({ event: "error", where: "todos", session: sid, error: String((e && e.stack) || e).slice(0, 300) }); }
-        todoSnap.set(sid, todos);
-        fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(path.join(dir, `${sid}.todos.json`), JSON.stringify({ t: Date.now(), todos }));
-        const task = st ? st.task : (await stateOf(sid)).task;
-        if (task) output.context.push(checklistAsk(task, todos));
-        event({ event: "asked", session: sid, task_chars: task ? task.length : 0, todos: todos.length });
-      } catch (e) { event({ event: "error", where: "checklist", session: sid, error: String((e && e.stack) || e).slice(0, 600) }); }
-    },
-    "experimental.chat.messages.transform": async (_input, output) => {
-      const msgs = output.messages;
-      for (let i = 0; i + 1 < msgs.length; i++) {
-        const u = msgs[i], a = msgs[i + 1];
-        if (u.info.role !== "user" || !u.parts.some((p) => p.type === "compaction")) continue;
-        if (a.info.role !== "assistant" || a.info.summary !== true) continue;
-        const sid = u.info.sessionID;
-        let st;
-        try { st = await stateOf(sid); }
-        catch (e) { event({ event: "error", where: "state", session: sid, error: String((e && e.stack) || e).slice(0, 600) }); continue; }
-        const added = {};
-        // the original request at the top, unless opencode already put it back after the summary (it re-sends the last
-        // request when a provider rejected it as too large)
-        const replayed = st.task && msgs.slice(i + 2).some((m) => m.info.role === "user" && norm(textOf(m)) === norm(st.task));
-        if (parts.has("reinsert") && st.task && !replayed) {
-          const task = st.task.length > TASK_MAX
-            ? st.task.slice(0, TASK_MAX) + `\n\n[... the rest of this request is the first message in ${st.file}]`
-            : st.task;
-          const part = { id: `${u.info.id}-request`, sessionID: sid, messageID: u.info.id, type: "text", synthetic: true,
-                         text: `My original request, repeated word for word from the start of this conversation:\n\n${task}\n\n` };
-          msgs[i] = { ...u, parts: [part, ...u.parts] };
-          added.task_chars = task.length;
-        }
-        const extra = [];
-        let todoAsk = null;   // last, after the pointer: the line right before the turn that continues the work
-        if (parts.has("checklist")) {
-          const summary = a.parts.filter((p) => p.type === "text").map((p) => p.text || "").join("\n");
-          added.checklist = /^\s*#+\s*Task checklist/im.test(summary);
-          added.not_started = (summary.match(/\[not started\]/gi) || []).length;
-          const todos = snapOf(sid);
-          if (todos.length) {
-            extra.push({ id: `${a.info.id}-todos`, sessionID: sid, messageID: a.info.id, type: "text", synthetic: true,
-                         text: `\n\nTodo list when this summary was written:\n${todoLines(todos)}` });
-            added.todos = todos.length;
-          }
-          // Kyle 10-30: the model keeps the checklist in its own todo list (only its todowrite tool can write it) and
-          // checks it before it finishes
-          const what = added.checklist ? "match the task checklist above, one item per line" : "cover every task in the original request";
-          todoAsk = { id: `${a.info.id}-todoask`, sessionID: sid, messageID: a.info.id, type: "text", synthetic: true,
-                       text: `\n\nNext: use the todowrite tool to make the todo list ${what}, each with its current status ` +
-                             `(completed, in_progress or pending). Then continue with the items that are not completed, keep the ` +
-                             `todo list up to date as you go, and check it before you finish.` };
-          added.todo_ask = true;
-        }
-        if (parts.has("pointer") && st.file) {
-          const line = `The full conversation before this summary (every message, tool call and complete tool output) is saved in ${st.file}. ` +
-                       `Search it (for example with grep -n) or read the part you need whenever a detail you need is missing from this summary.`;
-          extra.push({ id: `${a.info.id}-history`, sessionID: sid, messageID: a.info.id, type: "text", synthetic: true, text: `\n\n${line}` });
-          added.pointer = st.file;
-        }
-        if (todoAsk) extra.push(todoAsk);
-        if (extra.length) {
-          const ps = [...a.parts];
-          let at = ps.length;
-          for (let k = ps.length - 1; k >= 0; k--) if (ps[k].type === "text") { at = k + 1; break; }
-          ps.splice(at, 0, ...extra);
-          msgs[i + 1] = { ...a, parts: ps };
-        }
-        const key = `${sid}:${a.info.id}`;
-        if (!shown.has(key)) { shown.add(key); event({ event: "shown", session: sid, summary: a.info.id, replayed: !!replayed, ...added }); }
-        i += 1;
-      }
-      if (parts.has("no-stop-and-ask")) {
-        for (let i = 0; i < msgs.length; i++) {
-          const m = msgs[i];
-          if (m.info.role !== "user") continue;
-          const k = m.parts.findIndex((p) => p.type === "text" && p.synthetic && typeof p.text === "string" && p.text.endsWith(STOP_ASK));
-          if (k < 0) continue;
-          const ps = [...m.parts];
-          ps[k] = { ...ps[k], text: ps[k].text.slice(0, -STOP_ASK.length) + CONTINUE };
-          msgs[i] = { ...m, parts: ps };
-          const key = `${m.info.sessionID}:${m.info.id}:continue`;
-          if (!shown.has(key)) { shown.add(key); event({ event: "continue-replaced", session: m.info.sessionID, message: m.info.id }); }
-        }
-      }
-    },
-  };
-};
-'''
 
 if __name__ == "__main__":
     try:

@@ -14,8 +14,9 @@ For each model and setting:
      with the model's own recommended sampling.
   3. Saves the result in ~/.config/llm-launch/tuned.json; llm-launch then suggests this machine's number.
 
-Close other programs that use the GPU first (nvidia-smi shows them); keep the desktop on the Intel graphics. A run takes
-roughly 10-25 minutes per model and setting: most of it is reading long prompts. Ctrl-C stops it and the server.
+Close other programs that use the GPU first (nvidia-smi shows them); keep the desktop on the Intel graphics (Pop's
+Compute or Hybrid graphics mode). A run takes roughly 10-25 minutes per model and setting: most of it is reading long
+prompts. Ctrl-C stops it and the server.
 Python 3.8+, standard library only; uses llm-launch.py from the same folder.
 """
 import importlib.util, json, os, signal, subprocess, sys, threading, time, urllib.request
@@ -247,8 +248,8 @@ def main():
     used, free = mem(idx)
     print(f"{B}GPU{N}: {gname}, {total:,} MiB, {used:,} MiB in use now")
     if used > 300:
-        print(f"{R}   {used:,} MiB is already in use.{N} The result is only right for a GPU in the same state: close what nvidia-smi")
-        print("   lists (a model server, a browser on the NVIDIA GPU), or switch the desktop to the Intel graphics, then run this again.")
+        print(f"{R}   {used:,} MiB is already in use.{N} The result is only right for a GPU in the same state:")
+        for line in L.gpu_busy_advice(): print(line)
         if not L.yes("Measure anyway?", default=False): return 1
     if not L.port_free(PORT):
         sys.exit(f"{R}port {PORT} is in use (another llm-tune?){N}")
