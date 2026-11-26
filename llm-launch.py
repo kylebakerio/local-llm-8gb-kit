@@ -58,17 +58,10 @@ RECOMMENDED = {
     "Ternary-Bonsai-2.5-27B-PTQ1_0.gguf":      {"mtp_off": 88064, "mib_per_1k": 18.55},                  # max 90112
     "Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf":  {"mtp_off": 88064, "mtp_on": 41984, "mib_per_1k": 18.55}, # max 90112 / 44032
     "Ornith-1.5-9B-Q4_K_M.gguf":               {"mtp_off": 249856, "mtp_on": 180224, "mib_per_1k": 9.77}, # max 254976 / 185344
-    "Ternary-Bonsai-2-9B-PTQ1_0.gguf":         {"mtp_off": 262144, "mib_per_1k": 9.77},                  # the model's own max; 4.6 GB used
-    "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf": {"mtp_off": 262144, "mtp_on": 262144, "mib_per_1k": 11.8}, # 5.0 / 5.9 GB used
-    "Ternary-Bonsai-2-27B-PTQ1_0.gguf":        {"mtp_off": 88064, "mib_per_1k": 18.55},                  # 90112 held; 93184 crashed later
-    # not measured, inferred: the same Bonsai 2 9B weights, packed between the tested PTQ1_0 (4.6 GB used at 262k) and the
-    # PQ2_0-MTP file (5.0 GB used at 262k with MTP off), so 262k leaves ~3 GB spare on an 8 GB card
-    "Ternary-Bonsai-2-9B-PQ2_0.gguf":          {"mtp_off": 262144, "mib_per_1k": 9.77, "inferred": True},
-    "Ternary-Bonsai-2-9B-Q2_0.gguf":           {"mtp_off": 262144, "mib_per_1k": 9.77, "inferred": True},
+    # (Bonsai 2 27B and 9B were measured too, and dropped 11-25: Bonsai 2.5 does as well and adds images and MTP)
 }
 # the files the numbers above were measured with, per model (shown when a different file of that model is found)
-TESTED_FILES = {"Ternary-Bonsai-2.5-27B": "PTQ1_0 (or PTQ1_0-mtp)", "Ternary-Bonsai-2-27B": "PTQ1_0",
-                "Ternary-Bonsai-2-9B": "PTQ1_0 or PQ2_0-MTP-Q8_0", "Ornith-1.5-9B": "Q4_K_M"}
+TESTED_FILES = {"Ternary-Bonsai-2.5-27B": "PTQ1_0 (or PTQ1_0-mtp)", "Ornith-1.5-9B": "Q4_K_M"}
 # Each model's own recommended sampling (thinking mode; Ornith: its "precise coding" set), from the model cards, as
 # llama-server flags. The tests use exactly these. A model not listed gets llama.cpp's defaults plus whatever its GGUF
 # file sets.
@@ -84,7 +77,6 @@ DOWNLOADS = [
     ("prism-ml/Ternary-Bonsai-2.5-27B-GGUF", "Ternary-Bonsai-2.5-27B-PTQ1_0.gguf", "Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf"),
     ("prism-ml/Ternary-Bonsai-2.5-27B-GGUF", "Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf", "Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf"),
     ("ornith-ai/Ornith-1.5-9B-GGUF", "Ornith-1.5-9B-Q4_K_M.gguf", None),
-    ("prism-ml/Ternary-Bonsai-2-9B-gguf", "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf", "Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf"),
 ]
 # (the short system prompt lives in plugins/compaction-anchor.js, its SLIM_PROMPT; kit.json says which plugins a session gets)
 
@@ -166,8 +158,7 @@ def gguf_meta(path, want=("nextn_predict_layers", "context_length", "general.arc
 DEFAULT_DIRS = [os.path.join(HOME, "models"), os.path.join(HOME, "Downloads"), os.path.join(HOME, ".lmstudio", "models"),
                 os.path.join(HOME, ".cache", "lm-studio", "models")]
 # packings of the tested models that hold the same weights in more space: on 8 GB they leave little or no room for context
-BIGGER_PACKS = {"Ternary-Bonsai-2.5-27B-PQ2_0": "7.3 GB", "Ternary-Bonsai-2.5-27B-Q2_0": "7.7 GB",
-                "Ternary-Bonsai-2-27B-PQ2_0": "7.2 GB", "Ternary-Bonsai-2-27B-Q2_0": "7.6 GB"}
+BIGGER_PACKS = {"Ternary-Bonsai-2.5-27B-PQ2_0": "7.3 GB", "Ternary-Bonsai-2.5-27B-Q2_0": "7.7 GB"}
 
 
 def hf_cache():
