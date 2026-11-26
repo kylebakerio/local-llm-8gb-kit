@@ -231,6 +231,7 @@ def opencode_bin():
 
 def port_free(port):
     with socket.socket() as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)    # a just-closed server's TIME_WAIT is not "in use"
         try: s.bind(("127.0.0.1", port)); return True
         except OSError: return False
 
@@ -683,6 +684,7 @@ def pick_model(st):
                 k0 = "mtp=off,images=cpu" if "mtp=off,images=cpu" in here else sorted(here)[0]
                 r0 = here[k0]; sp = r0.get("speed") or {}; ds = sorted(sp, key=lambda x: int(x))
                 wr = f", writing {sp[ds[0]].get('writing')}-{sp[ds[-1]].get('writing')} t/s" if ds else ""
+                if ((r0.get("heat") or {}).get("severity")) in ("moderate", "heavy"): wr += f" (slowed by heat: {r0['heat']['severity']})"
                 tag = (f"  {D}measured here: " + (f"up to {r0.get('suggested', 0):,} tokens{wr}" if r0.get("suggested") else "does not fit")
                        + (f" (+{len(here) - 1} more setting{'s' if len(here) > 2 else ''})" if len(here) > 1 else "") + f"{N}")
             print(f"  {i:2d}) {m['name']}  {D}{gb(m['size'])}  {m['repo']}{N}{tag}")
@@ -719,25 +721,53 @@ def kshort(n):
     return f"{n // 1000}k" if n >= 1000 else str(n)
 
 
-def speed_lines(rec, indent="   "):
-    """The depth / reading / writing table of one measurement."""
+def speed_lines(rec, indent="   ", heat_summary=True):
+    """The depth / reading / writing table of one measurement (with the cool-card row and what heat cost, when
+    llm-tune recorded them)."""
     sp = rec.get("speed") or {}
+    heat = rec.get("heat") or {}
+    cool = heat.get("cool") or {}
     out = [f"{indent}{'depth':>9}   {'reading':>8}   {'writing':>8}   (tokens per second)"]
+    short = int((heat.get("hot") or {}).get("depth", 4096))
+    if cool:
+        out.append(f"{indent}{short:>9,}   {cool.get('reading', 0):>8,}   {cool.get('writing', 0):>8}   on a cool card"
+                   + (f" ({cool['temp_c']:.0f} °C)" if cool.get("temp_c") is not None else ""))
     for d in sorted(sp, key=lambda x: int(x)):
-        out.append(f"{indent}{int(d):>9,}   {sp[d].get('reading', 0):>8,}   {sp[d].get('writing', 0):>8}")
+        note = ""
+        if cool and int(d) == short:
+            hot = heat.get("hot") or {}
+            note = "   after a long run" + (f" ({hot['temp_c']:.0f} °C)" if hot.get("temp_c") is not None else "")
+        out.append(f"{indent}{int(d):>9,}   {sp[d].get('reading', 0):>8,}   {sp[d].get('writing', 0):>8}{note}")
+    if heat_summary and heat_short(heat):
+        out.append(f"{indent}heat: {heat_short(heat)}" + (" (what helps: README.md, section Heat)"
+                                                         if heat.get("severity") in ("moderate", "heavy") else ""))
     return out
+
+
+def heat_short(heat, compact=False):
+    """'heavy: writing 54% slower when hot (88 °C)' (compact: 'heavy (-54%, 88 °C)') -- what heat cost in one
+    measurement, or '' if not recorded."""
+    if not heat or not heat.get("severity"): return ""
+    s, loss, peak = heat["severity"], heat.get("writing_loss"), heat.get("peak_c")
+    if compact:
+        bits = ([f"-{loss:.0%}"] if loss is not None and s != "none" else []) + ([f"{peak:.0f} °C"] if peak is not None else [])
+        return s + (f" ({', '.join(bits)})" if bits else "")
+    if loss is not None and s != "none": s += f": writing {loss:.0%} slower when hot"
+    if peak is not None: s += f" ({peak:.0f} °C)"
+    return s
 
 
 def results_table(tuned=None):
     """Every measurement saved on this machine, one line each."""
     tuned = load_tuned() if tuned is None else tuned
     if not tuned: return ["   none yet: run llm-tune to measure a model on this machine"]
-    rows = [("model", "setting", "held", "suggested", "reading / writing at each depth (t/s)", "measured")]
+    rows = [("model", "setting", "held", "suggested", "reading / writing at each depth (t/s)", "heat", "measured")]
     for k in sorted(tuned):
         name, setting = k.split("|", 1); r = tuned[k]; sp = r.get("speed") or {}
         w = "  ".join(f"{kshort(int(d))}: {sp[d].get('reading')}/{sp[d].get('writing')}" for d in sorted(sp, key=lambda x: int(x)))
         if not r.get("max_ctx"): w = r.get("note") or "does not fit"
-        rows.append((name.replace(".gguf", ""), setting_label(setting), f"{r.get('max_ctx', 0):,}", f"{r.get('suggested', 0):,}", w or "-", r.get("measured", "")))
+        rows.append((name.replace(".gguf", ""), setting_label(setting), f"{r.get('max_ctx', 0):,}", f"{r.get('suggested', 0):,}", w or "-",
+                     heat_short(r.get("heat"), compact=True) or "-", r.get("measured", "")))
     wid = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
     line = lambda r: "   " + "  ".join(str(c).ljust(wid[i]) for i, c in enumerate(r))
     return [line(rows[0]), "   " + "  ".join("-" * w for w in wid)] + [line(r) for r in rows[1:]]

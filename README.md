@@ -124,7 +124,8 @@ When you quit opencode, it asks whether to stop the server.
 The contexts the launcher suggests were measured on a test GPU of the same generation as the 3070 Laptop. `llm-tune` measures them on this laptop instead: for any model file, including ones not in the table below, such as a different Ornith quant. With the setting you choose (MTP, images), it finds:
 
 - **the largest context that loads and holds:** it fills the context to 97% with real text, then sends requests at a few depths;
-- **reading and writing speed** at 4k, 32k and near that maximum.
+- **reading and writing speed** at 4k, 32k and near that maximum;
+- **what heat costs:** see *Heat* below.
 
 At the end it prints a table of this run and of every measurement on this machine. The launcher then:
 - suggests the measured context for that model and setting;
@@ -141,11 +142,36 @@ It lists what it will measure and roughly how long that takes, asks once, then r
 
 **Before you run it:**
 - Close other programs that use the GPU. `nvidia-smi` lists them.
-- Keep the desktop on the Intel graphics.
+- Keep the desktop on the Intel graphics (Compute or Hybrid mode).
+- Keep the laptop on its charger. On battery it warns you and asks first.
 
-It takes roughly 10 to 25 minutes per model and setting, mostly reading long prompts, so measuring everything can take an hour or two. Keep the laptop plugged in. `Ctrl-C` stops it, and the model server with it; finished measurements stay saved.
+It takes roughly 12 to 30 minutes per model and setting, mostly reading long prompts, so measuring everything can take one to three hours. Keep the laptop plugged in. `Ctrl-C` stops it, and the model server with it; finished measurements stay saved.
 
 Results are saved in `~/.config/llm-launch/tuned.json`, and logs in `~/.cache/llm-launch/`.
+
+### Heat
+
+A laptop GPU slows itself down when it gets hot, and a long coding session keeps it busy for hours. So for each model and setting, `llm-tune` does three things:
+- **A cool-card number:** before the speed test, it lets the GPU cool (up to 4 minutes) and measures 4k first.
+- **A hot number:** it measures 4k again at the end, after the long run. The table keeps this one, because it is what long sessions get.
+- **What happened in between:** every 2 seconds it records the GPU's temperature and clock, and whether the GPU said it was slowing itself for heat or because the charger could not keep up.
+
+It then reports:
+- how much slower writing and reading were when hot than when cool;
+- the peak temperature;
+- how much of the speed test the GPU spent slowed;
+- its clock against its clock when not slowed.
+
+It sums that up as **none**, **little** (writing under 10% slower), **moderate** (under 30%) or **heavy**. The launcher shows the same verdict beside the speeds.
+
+If any model came out moderate or heavy, the run ends with what helps:
+- **Raise the back of the laptop** 2 to 3 cm (a stand, or a book under the back edge), on a hard, flat surface: not a bed, a couch or a lap. The fans pull air in from underneath.
+- **Keep the vents clear.** On an older laptop, blow the dust out of the vents and fans.
+- **Add cooling:** a cooling pad (a stand with fans) and a cooler room both help.
+- **Use the full-size charger** the laptop came with. A weaker or USB-C charger makes the GPU hold back.
+- **Try the Performance power mode** (top-bar menu) while plugged in, then compare. Whether it helps depends on the laptop.
+
+After a change, measure again with `llm-tune --redo --one` and compare.
 
 ## Optional: the LL-Dash dashboard
 
