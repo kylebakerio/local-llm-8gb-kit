@@ -272,7 +272,7 @@ The test conditions:
   - Bonsai 2 9B usually finished within minutes with a fix that didn't work.
   - Ornith often repeated itself without changing anything until it was stopped.
 - **Speed:** each model ran half its bugs on the RTX 3060 and half on an RTX 4090 Laptop, also held to 8 GB. Her laptop measured slower than both (see *On her laptop*), so her runs will take longer.
-- **Plugins:** the tests used an earlier version of the compaction plugin in place of the task driver, and ran the 27B models at 90,112 tokens of context; the launcher suggests 88,064. A test of the launcher's exact plugin setup is running, and this section will be updated with what it shows.
+- **Plugins:** the tests used an earlier version of the compaction plugin in place of the task driver, and ran the 27B models at 90,112 tokens of context; the launcher suggests 88,064. A later test of the launcher's own setup was stopped partway, in favour of a new system prompt now being tested. On the 8 bugs it finished, every setup fixed 7 or 8, so the plugins made no clear difference there.
 
 Every model runs with its makers' recommended sampling settings, which the launcher sets itself:
 
