@@ -8,8 +8,9 @@ after downloading another model).
     the dashboard on 127.0.0.1:3000 only (its API can start programs; nothing else on the network should reach it).
   - <lab>/logs/profiles.json: one profile per tested model file found (Hugging Face downloads and ~/models), with MTP
     on and off where the file has an MTP head, each at the context tested to fit in 8 GB, q4_0 K/V, the model's own
-    recommended sampling, the image projector (when it is next to the model) on the CPU. Profiles you made yourself
-    are kept; ones this script made before are updated.
+    recommended sampling, the image projector (when it is next to the model) on the CPU, and for a mixture-of-experts
+    model the tested layout (the experts of its first layers in system RAM). Profiles you made yourself are kept; ones
+    this script made before are updated.
 The numbers and settings come from llm-launch.py (the same folder), so the launcher and the dashboard agree."""
 import importlib.util, json, os, re, sys, time
 
@@ -37,7 +38,10 @@ def sampling_fields(name):
 SLUG = {"Ternary-Bonsai-2.5-27B-PTQ1_0.gguf": "bonsai2.5-27b", "Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf": "bonsai2.5-27b",
         "Ornith-1.5-9B-Q4_K_M.gguf": "ornith1.5-9b", "Ternary-Bonsai-2-9B-PTQ1_0.gguf": "bonsai2-9b",
         "Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf": "bonsai2-9b", "Ternary-Bonsai-2-9B-PQ2_0.gguf": "bonsai2-9b",
-        "Ternary-Bonsai-2-9B-Q2_0.gguf": "bonsai2-9b"}
+        "Ternary-Bonsai-2-9B-Q2_0.gguf": "bonsai2-9b",
+        "Ternary-Bonsai-2.5-27B-Uncensored-PTQ1_0-mtp.gguf": "bonsai2.5-27b-uncensored",
+        "gemma-4-26B-A4B-it-UD-IQ4_XS.gguf": "gemma4-26b-a4b", "Qwen_Qwen3.6-35B-A3B-IQ3_XXS.gguf": "qwen3.6-35b-a3b",
+        "Ornith-1.5-35B-A3B-IQ3_XXS.gguf": "ornith1.5-35b-a3b"}
 
 
 def nice(name):
@@ -55,9 +59,11 @@ def profiles_for(model):
     for mtp in ([True, False] if has_mtp else [False]):
         ctx = rec.get("mtp_on" if mtp else "mtp_off")
         if not ctx: continue
+        n = L.cpu_layers_for(model["name"], mtp)          # experts of layers 0 .. n-1 in system RAM (the tested layout)
         cfg = {"modelPath": model["path"], "build": "prism", "ctx": ctx, "ngl": 999, "port": 8080, "devices": [],
                "fa": True, "cacheK": L.KV, "cacheV": L.KV, "jinja": True, "verbosity": 3,
-               "argString": " ".join(["-np", "1", "-fit", "off"] + rest), "note": TAG, **fields}
+               "argString": " ".join(["-np", "1", "-fit", "off"] + rest + (["-ot", L.experts_override(n)] if n else [])),
+               "note": TAG, **fields}
         if mtp:
             n = next((v for k, v in L.DRAFT_N.items() if model["name"].startswith(k)), 2)
             cfg.update(specType="draft-mtp", specDraftNMax=n, specDraftNMin=0)
