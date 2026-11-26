@@ -1102,9 +1102,9 @@ def fetch_file(d, name, size, sha, dest):
                         b = r.read(1 << 22)
                         if not b: break
                         fh.write(b); got += len(b)
-                        if time.time() - last > 2:
+                        if size > 10**8 and time.time() - last > 2:
                             last = time.time(); print(f"\r   {gb(got)} / {gb(size)}", end="", flush=True)
-                print()
+                if size > 10**8: print()
         if os.path.getsize(tmp) != size or sha256_file(tmp, name if size > 10**8 else None) != sha:
             os.remove(tmp)
             print(f"{R}   {name} does not match its published checksum: deleted (choose d to try again){N}")
