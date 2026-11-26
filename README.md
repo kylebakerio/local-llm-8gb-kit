@@ -64,7 +64,7 @@ To get updates later: `cd ~/local-llm-8gb-kit && git pull`.
 **Use Bonsai 2.5 27B (the PTQ1_0 file) for real coding work.**
 - In our coding tests on this 8 GB setup, it and Bonsai 2 27B each fixed 11 of 14 real bugs. The 9B models fixed 2 or 3. The details are under *What was measured*.
 - Bonsai 2.5 gets the nod over Bonsai 2 because it can also read images.
-- The 27B models are slow: a typical fix took about 40 minutes, and the longest took 2 hours.
+- The 27B models are slow: in testing, a typical fix took about 40 minutes, and the longest took 2 hours. Her laptop measured slower than the test card (see *On her laptop* below), so expect longer.
 - The `-mtp` file adds a speed-up head, but on this card that head halves the context (see the table). The coding tests ran with MTP off, and how well the model codes with half the context is untested.
 
 <details><summary>Doing these steps by hand</summary>
@@ -200,9 +200,28 @@ The test GPU (an RTX 3060, the same Ampere generation as the 3070 Laptop) was he
 
 \* **MTP's writing speed here is a best case.** It was measured continuing source code, where the draft head guesses right about 80% of the time. In normal agent work, expect roughly 1.5 to 1.9 times the MTP-off speed (PrismML's figure for Bonsai 2.5).
 
-**Her 3070 Laptop should match these or do a little better:**
-- **Writing** depends mostly on memory bandwidth, and hers has about 24% more, so expect 10 to 20% faster.
-- **Reading** depends mostly on compute, so expect about the same.
+**On her laptop** (measured with `llm-tune` on 11-24, MTP off, images on the CPU):
+
+| Model file | Max context that held | Suggested | Reading 4k / 32k / deep | Writing 4k / 32k / deep |
+|---|---|---|---|---|
+| Ternary-Bonsai-2.5-27B-PTQ1_0 | 100,352 | 97,280 | 257 / 198 / 144 (88k) | 13.6 / 7.5 / 4.8 |
+| Ternary-Bonsai-2-27B-PTQ1_0 | 102,400 | 99,328 | 254 / 197 / 143 (89k) | 13.5 / 7.7 / 4.6 |
+| Ornith-1.5-9B-AD-Q5_K-Q4_K | 240,640 | 235,520 | 734 / 447 / 317 (212k) | 13.1 / 10.2 / 4.7 |
+| Ternary-Bonsai-2-9B-PQ2_0 | 262,144 | 262,144 | 833 / 574 / 332 (236k) | 28.4 / 20.2 / 6.4 |
+
+- **Context:** her card holds about 10,000 more tokens than the test card did. The test card was held back with a safety margin, while on her laptop the desktop runs on the Intel graphics, so the model has nearly all of the NVIDIA card's memory. The launcher uses her own numbers from now on.
+- **Speed:** her card ran at a third to half of the test card's speed. That test card was a desktop RTX 3060 in an external box with its own fans.
+- **Why:** a laptop GPU under a long, full load heats up to its limit (87 °C) and then cuts its clocks. Our test laptop's RTX 4090, running the same kind of work, sat at 88 to 89 °C with its clocks at 500 to 630 MHz of a possible 3,105.
+- **What that means:** her numbers were measured over two hours of nonstop load, so they are most likely her laptop's heat-limited speed. Expect shorter jobs to run faster, until the GPU heats up.
+
+**To check whether her GPU is slowing itself,** run this in a second terminal while a model is writing (Ctrl-C stops it):
+
+```bash
+nvidia-smi --query-gpu=temperature.gpu,clocks.sm,clocks.max.sm,power.draw,clocks_throttle_reasons.sw_thermal_slowdown,clocks_throttle_reasons.hw_power_brake_slowdown --format=csv -l 2
+```
+
+- **Thermal slowdown `Active`, with the temperature near 87:** that's the heat. Raise the back of the laptop for airflow, keep the vents clear, or use a cooling pad.
+- **Power brake `Active`:** the charger can't supply enough. Use the full-size Lenovo charger the laptop came with, not a USB-C one.
 
 **Images.** With the image file loaded on the CPU, Bonsai 2.5 still held 90,112 tokens with no extra GPU memory. Reading a 320×240 image and answering about it took about 3 seconds on the test machine's CPU. Her CPU is older, so expect a little longer, and longer again for bigger images.
 
