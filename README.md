@@ -53,7 +53,7 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
   - [opencode-task-driver](https://github.com/kylebakerio/opencode-task-driver) 0.3.1, from its GitHub release;
   - the "slim" part of the compaction-anchor plugin, which comes built into the launcher.
 - **Your models.** Setup finds the models you already have anywhere in your home folder or on another mounted drive: the Hugging Face cache, `~/models`, `~/Downloads`, LM Studio's folders and so on.
-  - It covers Bonsai 2.5 27B and Ornith 1.5 9B.
+  - It covers Bonsai 2.5 27B, Bonsai 2 9B and Ornith 1.5 9B.
   - It says which files were tested and adds their folders to the launcher's search.
   - It downloads no models. To get one, use the launcher's model menu: choose `d`.
   - You can re-check any time with `python3 llm-launch.py --inventory`.
@@ -64,7 +64,7 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
 
 **Use Bonsai 2.5 27B (the PTQ1_0 file) for real coding work.**
 - In our coding tests on this 8 GB setup, it fixed 11 of 14 real bugs. The 9B models fixed 2 or 3. The details are under *What was measured*.
-- Bonsai 2 27B also fixed 11, but Bonsai 2.5 can read images and has the MTP speed-up, so the kit sticks with 2.5 and no longer offers Bonsai 2.
+- Bonsai 2 27B also fixed 11, but Bonsai 2.5 can read images and has the MTP speed-up, so the kit sticks with 2.5 and no longer offers Bonsai 2 27B.
 - The 27B models are slow: in testing, a typical fix took about 40 minutes, and the longest took 2 hours. Her laptop measured slower than the test card (see *On her laptop* below), so expect longer.
 - The `-mtp` file adds a speed-up head, but on this card that head halves the context (see the table). The coding tests ran with MTP off, and how well the model codes with half the context is untested.
 
@@ -103,9 +103,9 @@ Setup puts that command in `~/.local/bin`; in a terminal opened before setup, us
 It asks, in order:
 1. **Model:** pick one from the list.
 2. **MTP:** a draft head that makes writing faster but leaves less room for context.
-   - It is asked only for model files that contain one: Bonsai 2.5's `-mtp` file and Ornith 1.5 9B.
+   - It is asked only for model files that contain one: Bonsai 2.5's `-mtp` file, Bonsai 2 9B's `PQ2_0-MTP` file, and Ornith 1.5 9B.
    - For any other file it says there is none and runs without it.
-   - On 8 GB, MTP halves Bonsai 2.5's context and costs Ornith about a quarter of its context. The launcher's default follows that.
+   - On 8 GB, MTP halves Bonsai 2.5's context, costs Ornith about a quarter of its context, and costs Bonsai 2 9B nothing. The launcher's default follows that.
 3. **Images:** asked only if the model has an image file next to it. On the CPU (recommended) they cost no GPU memory. On the GPU, images are read faster, but there is less context.
 4. **Context:**
    - It suggests the tested maximum for the model and settings.
@@ -212,6 +212,7 @@ The test GPU (an RTX 3060, the same Ampere generation as the 3070 Laptop) was he
 | Ternary-Bonsai-2.5-27B-PTQ1_0-mtp | on | 44,032 | 41,984 |
 | Ornith-1.5-9B-Q4_K_M | off | 254,976 | 249,856 |
 | Ornith-1.5-9B-Q4_K_M | on | 185,344 | 180,224 |
+| Ternary-Bonsai-2-9B (PTQ1_0, or PQ2_0-MTP) | off / on | 262,144 (its maximum; only 4.6 / 5.9 GB used) | 262,144 |
 
 **Speed on the test GPU**, in tokens per second, at three conversation lengths. Reading is how fast it takes in the conversation; writing is how fast it answers:
 
@@ -220,6 +221,8 @@ The test GPU (an RTX 3060, the same Ampere generation as the 3070 Laptop) was he
 | Bonsai 2.5 27B | off | 573 / 487 / 373 (86k) | 43 / 29 / 18 |
 | Bonsai 2.5 27B | on | 533 / 465 / 441 (41k) | 86 / 61 / 65* |
 | Ornith 1.5 9B | off | 1,726 / 1,511 / 989 (131k) | 56 / 47 / 29 |
+| Bonsai 2 9B | off | 1,729 / 1,526 / 995 (131k) | 116 / 83 / 40 |
+| Bonsai 2 9B | on | 1,403 / 1,366 / 865 (131k) | 136 / 108 / 78* |
 
 \* **MTP's writing speed here is a best case.** It was measured continuing source code, where the draft head guesses right about 80% of the time. In normal agent work, expect roughly 1.5 to 1.9 times the MTP-off speed (PrismML's figure for Bonsai 2.5).
 
@@ -229,6 +232,7 @@ The test GPU (an RTX 3060, the same Ampere generation as the 3070 Laptop) was he
 |---|---|---|---|---|
 | Ternary-Bonsai-2.5-27B-PTQ1_0 | 100,352 | 97,280 | 257 / 198 / 144 (88k) | 13.6 / 7.5 / 4.8 |
 | Ornith-1.5-9B-AD-Q5_K-Q4_K | 240,640 | 235,520 | 734 / 447 / 317 (212k) | 13.1 / 10.2 / 4.7 |
+| Ternary-Bonsai-2-9B-PQ2_0 | 262,144 | 262,144 | 833 / 574 / 332 (236k) | 28.4 / 20.2 / 6.4 |
 
 - **Context:** her card holds about 10,000 more tokens than the test card did. The test card was held back with a safety margin, while on her laptop the desktop runs on the Intel graphics, so the model has nearly all of the NVIDIA card's memory. The launcher uses her own numbers from now on.
 - **Speed:** her card ran at a third to half of the test card's speed. That test card was a desktop RTX 3060 in an external box with its own fans.
@@ -275,6 +279,7 @@ Every model runs with its makers' recommended sampling settings, which the launc
 | Model | temperature | top-p | top-k | min-p | presence penalty |
 |---|---|---|---|---|---|
 | Bonsai 2.5 27B | 1.0 | 0.95 | 20 | 0 | 0 |
+| Bonsai 2 9B | 1.0 | 0.95 | 20 | 0 | 1.0 |
 | Ornith 1.5 9B (its "precise coding" setting) | 0.6 | 0.95 | 20 | 0 | 0 |
 
 ## What the launcher changes on your machine
