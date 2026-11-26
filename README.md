@@ -20,12 +20,12 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
   | Bonsai 2.5 27B Uncensored (with the MTP head) | 6.2 GB | A community edit of Bonsai 2.5 27B with refusals removed. It has the same size and layout, so it gets the same contexts. |
   | Gemma 4 26B-A4B (UD-IQ4_XS) | 13.6 GB | A mixture-of-experts model: see *Models that run partly from system RAM*. It has no MTP head. |
   | Qwen 3.6 35B-A3B (IQ3_XXS) | 15.8 GB | Mixture of experts, with an MTP head. |
-  | Ornith 1.5 35B-A3B (IQ3_XXS) | 15.3 GB | Mixture of experts, with an MTP head. It is a fine-tune of the Qwen 3.6 model above, at the same size. |
+  | Ornith 1.5 35B-A3B (IQ3_XXS) | 15.3 GB | Mixture of experts, with an MTP head. It is built on the same 35B-A3B design as the Qwen model above, and packed the same way. |
 
   The three mixture-of-experts files need about 45 GB of disk between them. The launcher checks free space before each download.
 - **A new system prompt, v1.1.** It replaces opencode's long built-in instructions. It also replaces the short "slim" prompt this kit used before. Your project's `AGENTS.md` is kept.
   - Why: its first version, v1, nearly doubled Bonsai 2.5 27B's score on our multi-bug tests, compared with opencode's own prompt: 11 of 15 bugs fixed against 6 of 15 (7/9 and 4/6, against 4/9 and 2/6). On single bugs the two were about level so far.
-  - v1.1 is v1 with some extra work trimmed. The model keeps a todo list only when a request has more than one problem. It updates that list along with its next step. It doesn't re-read code it has just edited. In a small first test, v1.1 did as well as v1.
+  - v1.1 is v1 with some extra work trimmed. The model keeps a todo list only when a request has more than one problem. It updates that list along with its next step. It doesn't re-read code it has just edited. In a first small test, on a different model, v1.1 scored about the same as v1: 9 of 11 against 10 of 11. It did not save time there. More tests are running.
   - When opencode summarizes a long session, the model is now told "Continue with the task." Before, it was told to continue or to stop and ask.
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
 - **The task driver is removed for now.** Our tests are moving to the new prompt first.
@@ -127,9 +127,9 @@ Setup puts that command in `~/.local/bin`; in a terminal opened before setup, us
 It asks, in order:
 1. **Model:** pick one from the list.
 2. **MTP:** a draft head that makes writing faster but leaves less room for context.
-   - It is asked only for model files that contain one: Bonsai 2.5's `-mtp` file, Bonsai 2 9B's `PQ2_0-MTP` file, and Ornith 1.5 9B.
+   - It is asked only for model files that contain one: Bonsai 2.5's `-mtp` files (the Uncensored edit's too), Bonsai 2 9B's `PQ2_0-MTP` file, Ornith 1.5 9B, the two 35B-A3B models, and the EXL3 models.
    - For any other file it says there is none and runs without it.
-   - On 8 GB, MTP halves Bonsai 2.5's context, costs Ornith about a quarter of its context, and costs Bonsai 2 9B nothing. The launcher's default follows that.
+   - On 8 GB, MTP halves Bonsai 2.5's context, costs Ornith 1.5 9B about a quarter of its context, and costs Bonsai 2 9B nothing. On the 35B-A3B models it keeps the context and moves more of the model into system RAM instead (see *Models that run partly from system RAM*). The launcher's default follows that.
 3. **Images:** asked only if the model has an image file next to it. On the CPU (recommended) they cost no GPU memory. On the GPU, images are read faster, but there is less context.
 4. **Context:**
    - It suggests the tested maximum for the model and settings.
