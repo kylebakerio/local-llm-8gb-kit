@@ -182,7 +182,8 @@ class TestDownloads(unittest.TestCase):
         for d in L.DOWNLOADS:
             self.assertRegex(d["rev"], r"^[0-9a-f]{40}$", d["label"])
             for name, size, sha in d["files"]:
-                self.assertRegex(sha, r"^[0-9a-f]{64}$", name); self.assertGreater(size, 10**8, name)
+                self.assertRegex(sha, r"^[0-9a-f]{64}$", name)
+                if d.get("kind") != "dir": self.assertGreater(size, 10**8, name)
         names = [d["files"][0][0] for d in L.DOWNLOADS]
         for f in ("Ternary-Bonsai-2.5-27B-Uncensored-PTQ1_0-mtp.gguf", "gemma-4-26B-A4B-it-UD-IQ4_XS.gguf",
                   "Qwen_Qwen3.6-35B-A3B-IQ3_XXS.gguf", "Ornith-1.5-35B-A3B-IQ3_XXS.gguf"):
@@ -247,6 +248,67 @@ class TestCheckKit(unittest.TestCase):
             p = {"name": "sp", "file": "plugins/system-prompt.js", "sha256": hashlib.sha256(b"x").hexdigest(), "options": {"file": "{kit}/prompts/p.md"}}
             out = []; C.check_plugin(p, False, out, {})
             self.assertTrue(any("whitespace" in x for x in out), out)
+
+
+class TestEXL3(unittest.TestCase):
+    """The EXL3 path (experimental): detection, TabbyAPI's settings, its health answer. TabbyAPI itself is not run here."""
+    def make(self, d, size=8570690830):
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump({"quantization_config": {"quant_method": "exl3", "bits": 2.0},
+                       "text_config": {"mtp_num_hidden_layers": 1, "max_position_embeddings": 262144}}, f)
+        for name, n in (("model-00001-of-00002.safetensors", size), ("model-00002-of-00002.safetensors", 1000)):
+            with open(os.path.join(d, name), "wb") as f: f.truncate(n)          # sparse: no disk used
+        return d
+
+    def test_found_as_an_exl3_model_and_matched_to_its_tested_settings(self):
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(L, "DEFAULT_DIRS", [t]), mock.patch.object(L, "hf_cache", lambda: os.path.join(t, "none")):
+            self.make(os.path.join(t, "turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw"))
+            with open(os.path.join(t, "config.json"), "w") as f: json.dump({"model_type": "llama"}, f)      # not EXL3: ignored
+            ms = [m for m in L.scan_models({}) if m.get("engine") == "exl3"]
+            self.assertEqual(len(ms), 1)
+            m = ms[0]
+            self.assertTrue(m["exl3"]["mtp"]); self.assertEqual(m["exl3"]["bits"], 2.0)
+            self.assertEqual(L.EXL3_RECOMMENDED[m["exl3"]["sig"]]["ctx"], 40960)
+
+    def test_tabby_config_is_the_lab_layout(self):
+        m = {"path": "/m/turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw/", "name": "x"}
+        c = L.exl3_config(m, 40960, True, 2, "4,4", 8081)
+        self.assertEqual((c["network"]["host"], c["network"]["port"], c["network"]["allowed_origins"]), ("127.0.0.1", 8081, []))
+        self.assertEqual((c["model"]["model_dir"], c["model"]["model_name"]), ("/m", "turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw"))
+        self.assertEqual((c["model"]["max_seq_len"], c["model"]["cache_size"], c["model"]["cache_mode"]), (40960, 40960, "4,4"))
+        self.assertEqual(c["draft_model"], {"draft_mode": "mtp", "draft_cache_mode": "4,4", "draft_num_tokens": 2})
+        self.assertTrue(c["model"]["use_generation_config"]); self.assertEqual(c["model"]["tool_format"], "auto")
+        self.assertEqual(L.exl3_config(m, 40960, False, 2, "4,4", 8081)["draft_model"], {"draft_mode": "disabled"})
+
+    def test_context_is_a_multiple_of_256(self):
+        st = {}
+        m = {"name": "x", "exl3": {"sig": "none", "bits": 2.0, "mtp": False, "native": 262144}}
+        with mock.patch.object(L, "ask", lambda *a, **k: "40000"):
+            self.assertEqual(L.choose_exl3(st, m)["ctx"], 39936)
+
+    def test_health_accepts_tabbys_answer(self):
+        import http.server, threading
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                b = b'{"status": "healthy", "issues": []}'
+                self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+            def log_message(self, *a): pass
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try: self.assertTrue(L.health(srv.server_address[1]))
+        finally: srv.shutdown(); srv.server_close()
+
+    def test_exl3_downloads_are_whole_pinned_folders(self):
+        ds = [d for d in L.DOWNLOADS if d.get("kind") == "dir"]
+        self.assertEqual(len(ds), 2)
+        for d in ds:
+            names = {f[0] for f in d["files"]}
+            self.assertTrue({"config.json", "model-00001-of-00002.safetensors", "tokenizer.json"} <= names)
+            self.assertTrue(all(len(f[2]) == 64 for f in d["files"]))
+            w = next(f for f in d["files"] if f[0] == "model-00001-of-00002.safetensors")
+            self.assertIn(f"{w[0]}:{w[1]}", L.EXL3_RECOMMENDED)
+            with tempfile.TemporaryDirectory() as t, mock.patch.object(L, "MODELS_DIR", t):
+                self.assertEqual(len(L.missing_files(d)), len(d["files"]))
 
 
 if __name__ == "__main__":

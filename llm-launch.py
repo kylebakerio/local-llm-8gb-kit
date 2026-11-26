@@ -33,6 +33,8 @@ opencode gets the plugins and settings kit.json names, for these sessions only. 
   - task driver (asked at each start, off unless you turn it on): opencode-task-driver 0.4.1 in focus mode (a request with
     several problems is split into tasks, worked one at a time) with the v1.1 prompt.
 A newer tested setup arrives as a kit update (--update).
+EXL3 models (experimental): a folder whose config.json says quant_method "exl3" runs on TabbyAPI + exllamav3 instead
+(install-exl3.sh installs them into ~/exl3); the launcher writes TabbyAPI's config.yml with the lab's settings.
 Files it writes: ~/.config/llm-launch/ (your choices, downloaded plugins, llm-tune's measurements), ~/.cache/llm-launch/
 (server logs), and the model entry in ~/.config/opencode/opencode.json (a backup is kept next to it the first time).
 Python 3.8+, standard library only.
@@ -135,6 +137,88 @@ DOWNLOADS = [
     {"label": "Ornith 1.5 35B-A3B IQ3_XXS (experts in RAM, MTP; being tested)", "repo": "bartowski/Ornith-1.5-35B-A3B-GGUF",
      "rev": "64b0493d34a5ca4c1b4ad67bb99b41d74b4f07d6", "new": "2026-11-26",
      "files": [("Ornith-1.5-35B-A3B-IQ3_XXS.gguf", 15340447392, "8918ccb9ee29abe3875efec0c3e86f0e35ef0b8a03e3f0e1c422869859a518d0")]},
+    {"label": "Qwen3.8-27B EXL3 2.00 bits per weight (turboderp; needs the EXL3 engine: experimental)", "kind": "dir",
+     "repo": "turboderp/Qwen3.8-27B-exl3", "rev": "98f2f8dfab4cb73ed1ae3428a1671483ab05c490", "subdir": "turboderp__Qwen3.8-27B-exl3__SCP_2.00bpw", "needs": "exl3",
+     "new": "2026-11-26",
+     "files": [
+               (".gitattributes", 1570, "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"),
+               ("LICENSE", 11544, "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"),
+               ("README.md", 65012, "57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641"),
+               ("cal_trace.json", 3410836, "7a3436f016f3f1822bc5de1cdbb23797965c145411b3c5c600fb27812d87dd2d"),
+               ("cal_trace.md", 2274406, "1356cd7eaa5eaf5eb4182529d925d5fa579eb28ac749032248a8e08632ccdcbc"),
+               ("cal_trace.safetensors", 4096088, "a034bee4c7920b4ac2e62b9d881a9b118488c414a81cf89aa64bd9274c47d685"),
+               ("chat_template.jinja", 9004, "af16f654968d47d09a6c604e00370b12dbc21f76456f59c9e98b82e84d9f6375"),
+               ("config.json", 4645, "4dfda0f243b79870356ae053cc8c5961abb25b6bf028bf9fa7fb86dcbc4a231a"),
+               ("crc32.txt", 238, "b42dd291f5f98b05807e458f5b47849969a9b3326acbf0c97d28b05826740b83"),
+               ("generation_config.json", 202, "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"),
+               ("kld_table.json", 190470, "aae4c43ba9b95749bd8cd1c0eb92012830d23d95706350538a80319829325720"),
+               ("measurement.json", 60916, "0ee08dec3537a438830198570b7dd492ee546b941901247b2d9654ed9deaaf6b"),
+               ("merges.txt", 3353259, "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"),
+               ("model-00001-of-00002.safetensors", 8570690830, "b6dc6ac9660936a3b3431546085c64680d11f04c29aedcf5181d01cd3486df49"),
+               ("model-00002-of-00002.safetensors", 1274185392, "a9c41b299c294b69d926efae202b4ee383e75fbfe8bf59fc336010c579c2e03f"),
+               ("model.safetensors.index.json", 295619, "ca964393247aa41add1369e1c1fa657b254098f0b8bb72b602ac918b155ced90"),
+               ("noise_attrib.json", 257094, "82c41c57a5970de325cdb5bc137a62b67fd0ba3bbe5be94f0d009099dd6182cd"),
+               ("preprocessor_config.json", 390, "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"),
+               ("qbench_prompts_div.json", 1920186, "4800f95d62e910fd098703b107e3bb26c376005bb2c53dfc7d3fe2323d1914f2"),
+               ("qbench_prompts_div.md", 1314356, "0158b7fe7e790e187e334fbed7abe88740e7c6692c1757583a8c736c639de4b8"),
+               ("qbench_prompts_gen.json", 344109, "6070481d810633355e264a618f8a3727af0fc135b3c3671c917928dc6dc215ed"),
+               ("qbench_prompts_gen.md", 228736, "a5a75cf17d725e15440afe644f41a090c2b860fe02f5ea1e69bff3bcd750b3a4"),
+               ("quantization_config.json", 629282, "1c29cdc8932a561ece5d47a19ebee78d7761eda3db315ff421d9a12de6e3c064"),
+               ("recipe_1.40bpw.yaml", 21487, "395099be69595d56444d53b8d3f3ae05141cbd02814e07256ca8e487acc28dc7"),
+               ("recipe_1.60bpw.yaml", 21487, "3ed1ef00984736488668efe456180ec3d1835a2009712aff2efe357c597f61e2"),
+               ("recipe_1.80bpw.yaml", 21487, "5fd281e12bb5fa0107d93ae470ba1c4f5d1f8d495e37f4734656b0c80854aa03"),
+               ("recipe_2.00bpw.yaml", 21490, "ef5ea53d7566b52638e6481ed7efedf0be26c868a4d50b5abb8e7ee08222f879"),
+               ("recipe_2.20bpw.yaml", 21484, "fc08aed44aa0cc993b53aaff36cc98dba2a1aa81fc5055812568e1c086d0872d"),
+               ("recipe_3.00bpw.yaml", 21487, "d977b2198b21721ae0e42667d89e2eb8107c15b8a8a3c3b16fe618d8f7e14353"),
+               ("recipe_4.00bpw.yaml", 21487, "0b4a5b64580cbc3abf3d08d0bea1f526c50c6d5738c638f41288595069cec3b4"),
+               ("recipe_5.00bpw.yaml", 21486, "1736b92c76728bb865fc38ed8a929dc6c21b077066fcb7815decfe20e5ccaad2"),
+               ("recipe_6.00bpw.yaml", 21486, "a95a52fb59b3976ee615c02df6f68efa758af95def6a519c8a4848b4964cd9c4"),
+               ("rfn_2.00bpw.json", 85427, "e66a8173c003f2b7e7fe89b7c10d6b0064a6ab1798078eedcf7d9b8555fa31c3"),
+               ("tokenizer.json", 12809320, "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3"),
+               ("tokenizer_config.json", 17928, "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27"),
+               ("video_preprocessor_config.json", 385, "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"),
+               ("vocab.json", 6722759, "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003")]},
+    {"label": "Qwen3.8-27B EXL3 1.75 bits per weight (turboderp; needs the EXL3 engine: experimental)", "kind": "dir",
+     "repo": "turboderp/Qwen3.8-27B-exl3", "rev": "2c1a38c2de43eab08cc8fba99656dc488e698cfb", "subdir": "turboderp__Qwen3.8-27B-exl3__SCP_1.75bpw", "needs": "exl3",
+     "new": "2026-11-26",
+     "files": [
+               (".gitattributes", 1570, "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"),
+               ("LICENSE", 11544, "bbedc3fda3305820b977265f01b8619d87570a6739de3a5582c3464840f1e57a"),
+               ("README.md", 65012, "57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641"),
+               ("cal_trace.json", 3410836, "7a3436f016f3f1822bc5de1cdbb23797965c145411b3c5c600fb27812d87dd2d"),
+               ("cal_trace.md", 2274406, "1356cd7eaa5eaf5eb4182529d925d5fa579eb28ac749032248a8e08632ccdcbc"),
+               ("cal_trace.safetensors", 4096088, "a034bee4c7920b4ac2e62b9d881a9b118488c414a81cf89aa64bd9274c47d685"),
+               ("chat_template.jinja", 9004, "af16f654968d47d09a6c604e00370b12dbc21f76456f59c9e98b82e84d9f6375"),
+               ("config.json", 4648, "2563697d3f21f1cea50f72f9c12f1bbeccc3f786d3a9bde4efe3ea0dde8ecd42"),
+               ("crc32.txt", 238, "b42dd291f5f98b05807e458f5b47849969a9b3326acbf0c97d28b05826740b83"),
+               ("generation_config.json", 202, "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"),
+               ("kld_table.json", 190470, "aae4c43ba9b95749bd8cd1c0eb92012830d23d95706350538a80319829325720"),
+               ("measurement.json", 60916, "0ee08dec3537a438830198570b7dd492ee546b941901247b2d9654ed9deaaf6b"),
+               ("merges.txt", 3353259, "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"),
+               ("model-00001-of-00002.safetensors", 8587658013, "e4c048aed121cc7fe17679498226b04b66ee52aeea0e2ec9baca1787922aebbc"),
+               ("model-00002-of-00002.safetensors", 416227710, "78b726c919466ff7c630f582165e6a0bffb9c02105caeccfaaaef309def879c3"),
+               ("model.safetensors.index.json", 295619, "a8e8a7658d741139f3bdbd489ad9da5a1acc260c7856e1fc0988059cc816e1ee"),
+               ("noise_attrib.json", 257094, "82c41c57a5970de325cdb5bc137a62b67fd0ba3bbe5be94f0d009099dd6182cd"),
+               ("preprocessor_config.json", 390, "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"),
+               ("qbench_prompts_div.json", 1920186, "4800f95d62e910fd098703b107e3bb26c376005bb2c53dfc7d3fe2323d1914f2"),
+               ("qbench_prompts_div.md", 1314356, "0158b7fe7e790e187e334fbed7abe88740e7c6692c1757583a8c736c639de4b8"),
+               ("qbench_prompts_gen.json", 344109, "6070481d810633355e264a618f8a3727af0fc135b3c3671c917928dc6dc215ed"),
+               ("qbench_prompts_gen.md", 228736, "a5a75cf17d725e15440afe644f41a090c2b860fe02f5ea1e69bff3bcd750b3a4"),
+               ("quantization_config.json", 629299, "f03a5b0e64061f0f6b921726dc2d9818910be6bada50013197d8ad9dbddfb777"),
+               ("recipe_1.40bpw.yaml", 21487, "395099be69595d56444d53b8d3f3ae05141cbd02814e07256ca8e487acc28dc7"),
+               ("recipe_1.60bpw.yaml", 21487, "3ed1ef00984736488668efe456180ec3d1835a2009712aff2efe357c597f61e2"),
+               ("recipe_1.80bpw.yaml", 21487, "5fd281e12bb5fa0107d93ae470ba1c4f5d1f8d495e37f4734656b0c80854aa03"),
+               ("recipe_2.00bpw.yaml", 21490, "ef5ea53d7566b52638e6481ed7efedf0be26c868a4d50b5abb8e7ee08222f879"),
+               ("recipe_2.20bpw.yaml", 21484, "fc08aed44aa0cc993b53aaff36cc98dba2a1aa81fc5055812568e1c086d0872d"),
+               ("recipe_3.00bpw.yaml", 21487, "d977b2198b21721ae0e42667d89e2eb8107c15b8a8a3c3b16fe618d8f7e14353"),
+               ("recipe_4.00bpw.yaml", 21487, "0b4a5b64580cbc3abf3d08d0bea1f526c50c6d5738c638f41288595069cec3b4"),
+               ("recipe_5.00bpw.yaml", 21486, "1736b92c76728bb865fc38ed8a929dc6c21b077066fcb7815decfe20e5ccaad2"),
+               ("recipe_6.00bpw.yaml", 21486, "a95a52fb59b3976ee615c02df6f68efa758af95def6a519c8a4848b4964cd9c4"),
+               ("rfn_2.00bpw.json", 85427, "e66a8173c003f2b7e7fe89b7c10d6b0064a6ab1798078eedcf7d9b8555fa31c3"),
+               ("tokenizer.json", 12809320, "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3"),
+               ("tokenizer_config.json", 17928, "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27"),
+               ("video_preprocessor_config.json", 385, "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"),
+               ("vocab.json", 6722759, "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003")]},
     {"label": "Ornith 1.5 9B Q4_K_M", "repo": "ornith-ai/Ornith-1.5-9B-GGUF", "rev": "abdd624b12ebf020b767fff532ff44fe552b28c3",
      "files": [("Ornith-1.5-9B-Q4_K_M.gguf", 5780090816, "70c112196e0b7023803c9762752e46d29e612a92c83f995bc3ba1ceb07e8fab6")]},
     {"label": "Bonsai 2 9B PQ2_0 with the MTP head + image file", "repo": "prism-ml/Ternary-Bonsai-2-9B-gguf",
@@ -142,6 +226,15 @@ DOWNLOADS = [
      "files": [("Ternary-Bonsai-2-9B-PQ2_0-MTP-Q8_0.gguf", 2675410720, "c79fcdfaf6b7bf47089b50dadcfd11f9ce7d3e96adf3bbefde7912e5ef69e22b"),
                ("Ternary-Bonsai-2-9B-mmproj-Q8_0.gguf", 624229664, "e0cb6f6988cea323ef798cd77d019bbb819af75582f034eaab0e7232314953db")]},
 ]
+# EXL3 (EXPERIMENTAL, still being tested): EXL3 models run on TabbyAPI + exllamav3, installed by install-exl3.sh into
+# ~/exl3. A folder is an EXL3 model when its config.json says quant_method "exl3"; the tested ones are told apart by their
+# first weights file (name:size). Their contexts are the lab's targets for an 8 GB card, NOT yet measured: 2.00 bits per
+# weight at about 40k tokens, 1.75 at about 80k; K/V cache 4-bit (cache_mode 4,4); MTP draft 2 tokens.
+EXL3_HOME = os.environ.get("EXL3_HOME") or os.path.join(HOME, "exl3")
+EXL3_RECOMMENDED = {
+    "model-00001-of-00002.safetensors:8570690830": {"label": "Qwen3.8-27B EXL3 2.00 bpw", "ctx": 40960, "draft_n": 2, "cache_mode": "4,4"},
+    "model-00001-of-00002.safetensors:8587658013": {"label": "Qwen3.8-27B EXL3 1.75 bpw", "ctx": 81920, "draft_n": 2, "cache_mode": "4,4"},
+}
 # (the system prompt is prompts/v1-1.md, delivered by plugins/system-prompt.js; kit.json says which plugins a session gets)
 
 B = "\033[1m" if sys.stdout.isatty() else ""
@@ -329,19 +422,43 @@ def scan_models(st):
         real = os.path.realpath(path)
         if real in found or not os.path.isfile(real): return
         found[real] = {"path": path, "name": name, "repo": repo, "size": os.path.getsize(real), "dir": os.path.dirname(path)}
+    def add_exl3(cfg, repo, name=None):
+        d = os.path.dirname(cfg); real = os.path.realpath(d)
+        if real in found: return
+        info = exl3_info(d)
+        if not info: return
+        name = name or os.path.basename(d.rstrip("/"))
+        found[real] = {"path": d, "name": name, "repo": repo, "size": info["size"], "dir": d, "engine": "exl3", "exl3": info}
     hub = hf_cache()
     for repo_dir in glob.glob(os.path.join(hub, "models--*")):
         repo = os.path.basename(repo_dir)[len("models--"):].replace("--", "/")
         snaps = sorted(glob.glob(os.path.join(repo_dir, "snapshots", "*")), key=os.path.getmtime, reverse=True)
         for s in snaps:
             for p in glob.glob(os.path.join(s, "**", "*.gguf"), recursive=True): add(p, repo)
+            for p in glob.glob(os.path.join(s, "config.json")): add_exl3(p, repo, f"{repo.split('/')[-1]}@{os.path.basename(s)[:8]}")
     for d in list(DEFAULT_DIRS) + [x for x in st.get("model_dirs", []) if x not in DEFAULT_DIRS]:
         d = os.path.expanduser(d)
         if not os.path.isdir(d): continue
         for p in glob.glob(os.path.join(d, "**", "*.gguf"), recursive=True):
             rel = os.path.relpath(os.path.dirname(p), d)
             add(p, (d.replace(HOME, "~", 1) if rel == "." else os.path.join(d.replace(HOME, "~", 1), rel)))
+        for p in glob.glob(os.path.join(d, "**", "config.json"), recursive=True): add_exl3(p, d.replace(HOME, "~", 1))
     return sorted(found.values(), key=lambda m: m["name"].lower())
+
+
+def exl3_info(d):
+    """For a folder that holds an EXL3 model: {bits, mtp, sig, size, native}; None for anything else."""
+    try:
+        with open(os.path.join(d, "config.json")) as f: cfg = json.load(f)
+    except (OSError, ValueError): return None
+    q = cfg.get("quantization_config") or {}
+    if not isinstance(q, dict) or q.get("quant_method") != "exl3": return None
+    weights = sorted(p for p in glob.glob(os.path.join(d, "*.safetensors")) if re.fullmatch(r"model(-\d{5}-of-\d{5})?\.safetensors", os.path.basename(p)))
+    if not weights: return None
+    tc = cfg.get("text_config") if isinstance(cfg.get("text_config"), dict) else cfg
+    return {"bits": q.get("bits"), "mtp": bool(tc.get("mtp_num_hidden_layers") or tc.get("num_nextn_predict_layers")),
+            "sig": f"{os.path.basename(weights[0])}:{os.path.getsize(weights[0])}", "size": sum(os.path.getsize(w) for w in weights),
+            "native": tc.get("max_position_embeddings")}
 
 
 def projector_for(model):
@@ -383,7 +500,7 @@ def port_free(port):
 def health(port):
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
-            return json.loads(r.read()).get("status") == "ok"
+            return json.loads(r.read()).get("status") in ("ok", "healthy")      # llama-server / TabbyAPI
     except Exception:
         return False
 
@@ -425,9 +542,16 @@ def wait_ready(p, port, timeout=600):
     print(); return False
 
 
-def warm_up(port):
+def warm_up(port, engine=None):
     """One tiny request: some GPU buffers are only allocated at the first request, so a context that loads can still run
     out of memory here."""
+    if engine == "exl3":
+        body = json.dumps({"messages": [{"role": "user", "content": "Hello"}], "max_tokens": 2, "stream": False}).encode()
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", data=body, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=600) as r: r.read(); return True
+        except Exception:
+            return False
     body = json.dumps({"prompt": "Hello", "n_predict": 2, "cache_prompt": False}).encode()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/completion", data=body, headers={"Content-Type": "application/json"})
     try:
@@ -479,6 +603,111 @@ def explain_failure(log, mtp, proj, proj_gpu, model=None):
     for line in gpu_busy_advice("     "): print(line)
     if moe and (RECOMMENDED.get(model["name"]) or {}).get("estimated") and mtp:
         print(f"   - with MTP on, this model's layout is estimated, not measured: llm-tune --fit measures what fits on this machine")
+
+
+# ------------------------------------------------------------------ the EXL3 engine (experimental): TabbyAPI + exllamav3
+# TabbyAPI reads config.yml (JSON is valid YAML) and its templates / sampler_overrides from the folder it starts in; it
+# is started through runpy so neither that folder nor the script's own is put on sys.path ahead of its tree.
+EXL3_BOOT = ("import runpy, sys\nT = sys.argv[1]\nsys.path.insert(0, T)\nsys.argv = [T + '/main.py']\n"
+             "runpy.run_path(T + '/main.py', run_name='__main__')\n")
+
+
+def exl3_python(): return os.path.join(EXL3_HOME, "venv", "bin", "python")
+def exl3_tabby(): return os.path.join(EXL3_HOME, "tabbyAPI")
+
+
+def exl3_installed():
+    """install-exl3.sh finished: its stamp, the venv's python and TabbyAPI's main.py are there."""
+    return (os.path.isfile(os.path.join(EXL3_HOME, "INSTALLED")) and os.access(exl3_python(), os.X_OK)
+            and os.path.isfile(os.path.join(exl3_tabby(), "main.py")))
+
+
+def exl3_config(model, ctx, mtp, draft_n, cache_mode, port):
+    """TabbyAPI's settings for one model: the lab's launch settings (loopback only, so no API key; one request at a time;
+    the model's own generation_config.json sampling -- temperature 1.0, top-p 0.95, top-k 20 for Qwen3.8 -- for requests
+    that set none, as opencode's; its chat template's reasoning and tool-call format)."""
+    d = model["path"].rstrip("/")
+    return {
+        "network": {"host": "127.0.0.1", "port": port, "disable_auth": True, "allowed_origins": [], "web_ui": False,
+                    "api_servers": ["OAI"], "send_tracebacks": False, "sse_ping_interval": 15, "access_log": False,
+                    "disable_fetch_requests": True, "enable_metrics": False},
+        "logging": {"log_prompt": False, "log_generation_params": False, "log_requests": False, "log_live_status": False,
+                    "log_timestamps": True, "log_auth_keys": False, "log_chat_completion_requests": False},
+        "model": {"model_dir": os.path.dirname(d), "model_name": os.path.basename(d), "inline_model_loading": False,
+                  "use_dummy_models": False, "backend": "exllamav3", "max_seq_len": ctx, "cache_size": ctx,
+                  "cache_mode": cache_mode, "max_batch_size": 1, "chunk_size": 2048, "output_chunking": True,
+                  "tensor_parallel": False, "gpu_split_auto": True, "vision": False, "use_generation_config": True,
+                  "warmup": True, "reasoning": True, "reasoning_start_token": "auto", "reasoning_end_token": "auto",
+                  "start_in_reasoning": "auto", "tool_format": "auto"},
+        "draft_model": ({"draft_mode": "mtp", "draft_cache_mode": cache_mode, "draft_num_tokens": draft_n} if mtp
+                        else {"draft_mode": "disabled"}),
+        "sampling": {"override_preset": "safe_defaults"},
+        "memory": {"sysmem_recurrent_cache": 2048, "sysmem_kv_cache": 0},
+        "developer": {"unsafe_launch": False, "disable_request_streaming": False, "realtime_process_priority": False},
+    }
+
+
+def start_exl3(model, c, port, log):
+    """TabbyAPI with this model, in its own folder under ~/.cache/llm-launch/ (its config.yml is kept there)."""
+    run = os.path.join(LOG_DIR, "exl3-" + time.strftime("%Y%m%d-%H%M%S"))
+    os.makedirs(run, exist_ok=True)
+    cfg = exl3_config(model, c["ctx"], c["mtp"], c["draft_n"], c["cache_mode"], port)
+    with open(os.path.join(run, "config.yml"), "w") as f: json.dump(cfg, f, indent=1)
+    for sub in ("templates", "sampler_overrides"):
+        src, dst = os.path.join(exl3_tabby(), sub), os.path.join(run, sub)
+        if os.path.isdir(src) and not os.path.lexists(dst): os.symlink(src, dst)
+    argv = [exl3_python(), "-I", "-c", EXL3_BOOT, exl3_tabby()]
+    fh = open(log, "w")
+    fh.write(f"$ (in {run}) {exl3_python()} -I -c <runpy main.py> {exl3_tabby()}\n{json.dumps(cfg)}\n\n"); fh.flush()
+    p = subprocess.Popen(argv, cwd=run, stdout=fh, stderr=subprocess.STDOUT, env=dict(os.environ, CUDA_DEVICE_ORDER="PCI_BUS_ID"),
+                         start_new_session=True)
+    return p, argv
+
+
+def choose_exl3(st, model):
+    """MTP and context for an EXL3 model (no image or RAM questions: the lab runs it text-only, all of it on the GPU)."""
+    info = model["exl3"]; rec = EXL3_RECOMMENDED.get(info["sig"]) or {}
+    mem = st.setdefault("models", {}).setdefault(model["name"], {})
+    print(f"\n{B}EXL3 engine{N} ({R}experimental{N}: our tests of it are still running). {info['bits']} bits per weight"
+          + (f": {rec['label']}." if rec else "; not a file this kit tested."))
+    mtp = False
+    if info["mtp"]:
+        print(f"\n{B}MTP{N} (a built-in draft head that makes generation faster).")
+        mtp = yes("Use MTP?", default=mem.get("mtp", True))
+    key = f"engine=exl3,mtp={'on' if mtp else 'off'}"
+    suggested = rec.get("ctx")
+    last = st.get("_tried", {}).get(f"{model['name']}|{key}") or mem.get("ctx", {}).get(key)
+    native = info.get("native")
+    print(f"\n{B}Context{N} (how many tokens the model can keep in view at once).")
+    if suggested: print(f"   The lab's target for an 8 GB card: {suggested:,} (not measured yet: if it does not fit, try less)")
+    else: print("   No number for this model: enter one (if it does not fit, the server will say so)")
+    if last: print(f"   You used {last:,} last time.")
+    while True:
+        v = ask("Context", default=str(last or suggested or ""))
+        ctx = parse_ctx(v) if v else None
+        if ctx and ctx >= 2048:
+            if native and ctx > native: ctx = native
+            ctx = ctx // 256 * 256                     # exllamav3: a multiple of 256
+            break
+        print("   Enter a number of tokens, e.g. 40960 or 40k.")
+    return {"mtp": mtp, "proj": None, "proj_gpu": False, "ctx": ctx, "key": key, "draft_n": rec.get("draft_n", 2),
+            "cache_mode": rec.get("cache_mode", "4,4"), "engine": "exl3"}
+
+
+def explain_exl3_failure(log, c):
+    try: lines = open(log, errors="replace").read().splitlines()
+    except OSError: lines = []
+    errs = [l for l in lines if ERR.search(l)]
+    print(f"\n{R}{B}The EXL3 engine (TabbyAPI) did not start.{N} Its error output:\n")
+    for l in (errs[-15:] or lines[-20:]): print("   " + l[-220:])
+    print(f"\n   (full log: {log})\n")
+    text = "\n".join(lines).lower()
+    print(f"{B}If it did not fit in the GPU's memory{N}" + (" (it says out of memory above)" if "out of memory" in text else "") + ", you can:")
+    print("   a) use a smaller context")
+    if c["mtp"]: print("   b) turn MTP off")
+    print("   - and check nothing else is using the GPU:")
+    for line in gpu_busy_advice("     "): print(line)
+    print(f"   The EXL3 engine is experimental (README.md). To reinstall it:  bash {os.path.join(KIT, 'install-exl3.sh')}")
 
 
 # ------------------------------------------------------------------ opencode
@@ -806,7 +1035,8 @@ def have_file(name, size, st=None):
 
 def target_dir(d, st=None):
     """Where a menu entry's files go: next to its model file when that is already somewhere writable (an image file
-    must sit next to its model), else ~/models/<repo>/."""
+    must sit next to its model), else ~/models/<repo>/. A model that is a folder (EXL3): ~/models/<subdir>/."""
+    if d.get("kind") == "dir": return os.path.join(MODELS_DIR, d["subdir"])
     p = have_file(d["files"][0][0], d["files"][0][1], st)
     if p and not os.path.realpath(p).startswith(os.path.realpath(hf_cache())) and os.access(os.path.dirname(p), os.W_OK):
         return os.path.dirname(p)
@@ -814,7 +1044,11 @@ def target_dir(d, st=None):
 
 
 def missing_files(d, st=None):
-    """The files of a menu entry not there yet: the model anywhere the launcher looks, the others next to it."""
+    """The files of a menu entry not there yet: the model anywhere the launcher looks, the others next to it (a model
+    that is a folder: every file in its folder)."""
+    if d.get("kind") == "dir":
+        t = target_dir(d, st)
+        return [f for f in d["files"] if not (os.path.isfile(os.path.join(t, f[0])) and os.path.getsize(os.path.join(t, f[0])) == f[1])]
     first, rest = d["files"][0], d["files"][1:]
     p = have_file(first[0], first[1], st)
     out = [] if p else [first]
@@ -849,7 +1083,7 @@ def fetch_file(d, name, size, sha, dest):
     """Download one file of a pinned revision into dest; it is kept only if its sha256 matches. True when it is there."""
     out = os.path.join(dest, name)
     url = f"{HF}/{d['repo']}/resolve/{d['rev']}/{name}"
-    hf = shutil.which("hf")
+    hf = shutil.which("hf") if d.get("kind") != "dir" else None
     try:
         if hf:
             rc = subprocess.call([hf, "download", d["repo"], name, "--revision", d["rev"], "--local-dir", dest])
@@ -871,12 +1105,12 @@ def fetch_file(d, name, size, sha, dest):
                         if time.time() - last > 2:
                             last = time.time(); print(f"\r   {gb(got)} / {gb(size)}", end="", flush=True)
                 print()
-        if os.path.getsize(tmp) != size or sha256_file(tmp, name) != sha:
+        if os.path.getsize(tmp) != size or sha256_file(tmp, name if size > 10**8 else None) != sha:
             os.remove(tmp)
             print(f"{R}   {name} does not match its published checksum: deleted (choose d to try again){N}")
             return False
         if tmp != out: os.replace(tmp, out)
-        print(f"   done, checksum ok: {out.replace(HOME, '~', 1)}")
+        if size > 10**8 or d.get("kind") != "dir": print(f"   done, checksum ok: {out.replace(HOME, '~', 1)}")
         return True
     except KeyboardInterrupt:
         print(f"\n   stopped; choosing it again resumes the download"); return False
@@ -890,6 +1124,17 @@ def get_download(d, st=None, ask_first=True):
     miss = missing_files(d, st)
     if not miss: print(f"   have it: {d['label']}"); return True
     dest = target_dir(d, st)
+    if d.get("needs") == "exl3" and not exl3_installed():
+        print(f"   {D}(this model needs the EXL3 engine, which is experimental: bash {os.path.join(KIT, 'install-exl3.sh')}){N}")
+    if d.get("kind") == "dir":         # many files: one question for the whole folder
+        total = sum(f[1] for f in miss); free = disk_free(dest)
+        if free - total < DISK_MARGIN:
+            print(f"{R}   Not enough disk space for {d['label']} ({gb(total)}):{N} {gb(free)} free, and {gb(DISK_MARGIN)} should stay free.")
+            return False
+        if ask_first and not yes(f"   Download it ({len(miss)} files, {gb(total)}; {gb(free)} free, {gb(free - total)} after)?", default=True): return False
+        os.makedirs(dest, exist_ok=True)
+        print(f"   downloading into {dest.replace(HOME, '~', 1)} from {d['repo']} (revision {d['rev'][:8]}) ...")
+        return all([fetch_file(d, name, size, sha, dest) for name, size, sha in miss])
     ok = True
     for name, size, sha in miss:
         free = disk_free(dest)
@@ -924,10 +1169,11 @@ def offer_new_downloads(st):
     """Once per model: the models a kit update added to the download menu, each asked separately (with its size and the
     free disk space). A no is remembered; they stay in the menu (d)."""
     offered = st.setdefault("offered_downloads", [])
-    new = [d for d in DOWNLOADS if d.get("new") and d["files"][0][0] not in offered]
+    key = lambda d: d.get("subdir") or d["files"][0][0]
+    new = [d for d in DOWNLOADS if d.get("new") and key(d) not in offered and not (d.get("needs") == "exl3" and not exl3_installed())]
     if not new: return
     todo = [d for d in new if missing_files(d, st)]
-    for d in new: offered.append(d["files"][0][0])
+    for d in new: offered.append(key(d))
     save_state(st)
     if not todo: return
     print(f"\n{B}New in this kit: {len(todo)} model{'s' if len(todo) > 1 else ''} to try{N} (being tested for this laptop; README.md, the model list):")
@@ -951,7 +1197,7 @@ def inventory(st):
     """Find the models this kit knows about anywhere in the home folder (and other mounted drives), say what is known about each, and add their
     folders to the launcher's search path. Exit status 0 when a tested Bonsai 2.5 27B file is among them, else 3."""
     skip = {os.path.join(HOME, x) for x in (".local/share/Trash", "snap", ".npm", ".cargo", ".rustup", ".nvm")}
-    found = []
+    found, exl3_found = [], []
     user = os.path.basename(HOME)
     tops = [HOME] + [d for d in (f"/media/{user}", f"/run/media/{user}", "/mnt") if os.path.isdir(d)]   # other drives too
     walk = (x for top in tops for x in os.walk(top, followlinks=False))
@@ -960,6 +1206,7 @@ def inventory(st):
         if root in skip or root[len(top):].count(os.sep) >= 7:
             dirs[:] = []; continue
         dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
+        if "config.json" in files and exl3_info(root): exl3_found.append(root)
         for f in files:
             if f.lower().endswith(".gguf") and "mmproj" not in f.lower() and any(f.startswith(k) for k in TESTED_FILES):
                 if not re.search(r"-(\d{5})-of-\d{5}\.gguf$", f) or "-00001-of-" in f: found.append(os.path.join(root, f))
@@ -983,6 +1230,12 @@ def inventory(st):
         print(f"   {name}  {D}{size}{N}\n      {what}{'; image file next to it' if proj else ''}\n      {D}{path.replace(HOME, '~', 1)}{N}")
         d = os.path.dirname(path)
         if not d.startswith(hf_cache()): add_dir(st, d)
+    for d in exl3_found:
+        info = exl3_info(d); rec = EXL3_RECOMMENDED.get(info["sig"])
+        print(f"   {os.path.basename(d)}  {D}{gb(info['size'])}{N}\n      EXL3 ({info['bits']} bits per weight; experimental)"
+              + (f": the lab's target {rec['ctx']:,} tokens" if rec else ": not tested here")
+              + ("" if exl3_installed() else "; needs the EXL3 engine (bash install-exl3.sh)") + f"\n      {D}{d.replace(HOME, '~', 1)}{N}")
+        if not d.startswith(hf_cache()): add_dir(st, os.path.dirname(d))
     return 0 if have_b25 else 3
 
 
@@ -1005,6 +1258,10 @@ def pick_model(st):
                 if ((r0.get("heat") or {}).get("severity")) in ("moderate", "heavy"): wr += f" (slowed by heat: {r0['heat']['severity']})"
                 tag = (f"  {D}measured here: " + (f"up to {r0.get('suggested', 0):,} tokens{wr}" if r0.get("suggested") else "does not fit")
                        + (f" (+{len(here) - 1} more setting{'s' if len(here) > 2 else ''})" if len(here) > 1 else "") + f"{N}")
+            if m.get("engine") == "exl3":
+                r = EXL3_RECOMMENDED.get(m["exl3"]["sig"]) or {}
+                tag = f"  {D}EXL3, experimental" + (f": about {r['ctx']:,} tokens (not measured yet)" if r else "") + f"{N}"
+                if not exl3_installed(): tag += f"  {R}needs the EXL3 engine: bash install-exl3.sh{N}"
             print(f"  {i:2d}) {m['name']}  {D}{gb(m['size'])}  {m['repo']}{N}{tag}")
         print(f"   d) download a model    f) add a folder to search    r) measurements on this machine    q) quit")
         v = ask("Model").lower()
@@ -1015,7 +1272,12 @@ def pick_model(st):
         if v == "f":
             add_dir(st, ask("Folder with .gguf files"))
             continue
-        if v.isdigit() and 1 <= int(v) <= len(models): return models[int(v) - 1]
+        if v.isdigit() and 1 <= int(v) <= len(models):
+            m = models[int(v) - 1]
+            if m.get("engine") == "exl3" and not exl3_installed():
+                print(f"{R}This EXL3 model needs the EXL3 engine (experimental).{N} Install it with:  bash {os.path.join(KIT, 'install-exl3.sh')}")
+                continue
+            return m
 
 
 def load_tuned():
@@ -1261,22 +1523,25 @@ def main():
     if not check_opencode_config(): return 1
     if sys.stdin.isatty(): offer_new_downloads(st)
     model = pick_model(st)
+    exl = model.get("engine") == "exl3"
     while True:
-        c = choose(st, model)
+        c = choose_exl3(st, model) if exl else choose(st, model)
         sid = choose_setup(st)
         port = DEFAULT_PORT
         while not port_free(port): port += 1
-        log = os.path.join(LOG_DIR, f"llama-server-{time.strftime('%Y%m%d-%H%M%S')}.log")
+        log = os.path.join(LOG_DIR, f"{'tabbyapi' if exl else 'llama-server'}-{time.strftime('%Y%m%d-%H%M%S')}.log")
         mid = model_id(model["name"])
-        print(f"\nStarting llama-server: {model['name']}, {c['ctx']:,} tokens, MTP {'on' if c['mtp'] else 'off'}"
+        print(f"\nStarting {'the EXL3 engine (TabbyAPI)' if exl else 'llama-server'}: {model['name']}, {c['ctx']:,} tokens, MTP {'on' if c['mtp'] else 'off'}"
               + (f", images on the {'GPU' if c['proj_gpu'] else 'CPU'}" if c["proj"] else "") + f" (port {port})")
-        p, argv = start_server(server, model, c["ctx"], c["mtp"], c["draft_n"], c["proj"], c["proj_gpu"], port, log)
+        if exl: p, argv = start_exl3(model, c, port, log)
+        else: p, argv = start_server(server, model, c["ctx"], c["mtp"], c["draft_n"], c["proj"], c["proj_gpu"], port, log)
         RUNNING[0] = p
         st.setdefault("_tried", {})[f"{model['name']}|{c['key']}"] = c["ctx"]      # proposed again on a retry in this run
-        ok = wait_ready(p, port) and warm_up(port) and p.poll() is None
+        ok = wait_ready(p, port, timeout=1800 if exl else 600) and warm_up(port, c.get("engine")) and p.poll() is None
         if not ok:
             stop_server(p)
-            explain_failure(log, c["mtp"], c["proj"], c["proj_gpu"], model)
+            if exl: explain_exl3_failure(log, c)
+            else: explain_failure(log, c["mtp"], c["proj"], c["proj_gpu"], model)
             if yes("\nTry again with different settings?", default=True): continue
             sys.exit(1)
         print("   ready.")
@@ -1296,7 +1561,8 @@ def main():
         died = p.poll() is not None
         if died:
             print(f"\n{R}The model server stopped while opencode was running.{N}")
-            explain_failure(log, c["mtp"], c["proj"], c["proj_gpu"], model)
+            if exl: explain_exl3_failure(log, c)
+            else: explain_failure(log, c["mtp"], c["proj"], c["proj_gpu"], model)
         else:
             if yes("\nStop the model server?", default=True): stop_server(p)
             else: print(f"   It keeps running on port {port} (pid {p.pid}); stop it with: kill {p.pid}")

@@ -107,6 +107,18 @@ case ":$PATH:" in
         echo "   From now on, run  llm-launch  in any project folder: open a new terminal first (~/.local/bin was added to ~/.bashrc)." ;;
 esac
 
+say "7. Optional, experimental: the EXL3 engine"
+# TabbyAPI + exllamav3, for the EXL3 models (Qwen3.8-27B EXL3). Still being tested; about 5 GB to download.
+if [ -f "${EXL3_HOME:-$HOME/exl3}/INSTALLED" ]; then
+    bash "$KIT/install-exl3.sh" || echo "   the EXL3 engine needs an update and it did not finish: run  bash $KIT/install-exl3.sh"
+else
+    echo "   A second engine, for EXL3 models (Qwen3.8-27B at 2 bits per weight). It is experimental: our tests of it are"
+    echo "   still running. About 5 GB to download, 9 GB on disk, into ~/exl3. The rest of the kit works without it."
+    read -r -p "   Install the EXL3 engine? [y/N] " a
+    if [[ "$a" =~ ^[Yy] ]]; then bash "$KIT/install-exl3.sh" || echo "   not installed; run  bash $KIT/install-exl3.sh  to try again"
+    else echo "   skipped (later:  bash $KIT/install-exl3.sh)"; fi
+fi
+
 mkdir -p "$HOME/.config/llm-launch" && kitval setup_version > "$HOME/.config/llm-launch/setup_version"
 
 say "Done."

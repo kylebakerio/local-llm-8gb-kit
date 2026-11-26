@@ -598,6 +598,9 @@ def main():
     what = ask_what()
     if not one:
         models = L.scan_models(st)
+        exl = [m for m in models if m.get("engine") == "exl3"]
+        if exl: print(f"   {D}(not measured here: {', '.join(m['name'] for m in exl)} -- EXL3 models; llm-tune measures llama.cpp models only){N}")
+        models = [m for m in models if m.get("engine") != "exl3"]
         tuned = load_tuned()
         todo, have = [], []
         for m in models:
@@ -626,6 +629,8 @@ def main():
         todo = [(m, s, k) for m, s, k, n in todo]
     if one:
         model = L.pick_model(st)
+        if model.get("engine") == "exl3":
+            print(f"{R}llm-tune measures llama.cpp models only{N}; an EXL3 model's context is set in the launcher."); return 1
         c = L.choose(st, model, ask_ctx=False)          # the MTP / images questions
         todo = [(model, {"mtp": c["mtp"], "draft_n": c["draft_n"], "proj": c["proj"], "proj_gpu": c["proj_gpu"]}, c["key"])]
         redo = True                                     # one model picked by hand: measure it (again)

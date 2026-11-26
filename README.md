@@ -30,6 +30,7 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
 - **The task driver is removed for now.** Our tests are moving to the new prompt first.
 - **`llm-tune` runs the fit test and the speed test separately.** For any model you can run either one. The fit test now also checks system RAM.
+- **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to about 2 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
 
 ## One-time setup
 
@@ -79,6 +80,8 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
   - Get more models later from the launcher: choose `d` at its model menu, or run `llm-launch --download`.
   - Every download in that menu is pinned to one published version of its files. Each file is checked against its published checksum and kept only if it matches.
   - After this update, the launcher offers each new model once. If you say no, it stays in the `d` menu.
+
+- **Optional, experimental: the EXL3 engine** (TabbyAPI with exllamav3, into `~/exl3`). Setup asks; the answer defaults to no. See *EXL3 models (experimental)*.
 
 **Updates:** at each start, `llm-launch` checks GitHub for a newer kit and asks before it updates. A newer kit can bring new plugin versions, or a system prompt that did better in our tests. To update by hand, run `llm-launch --update`. If an update also needs a setup step, such as a new opencode version, it offers to run `setup.sh` for you. Your settings and `llm-tune`'s measurements are kept.
 
@@ -158,6 +161,27 @@ Gemma 4 26B-A4B, Qwen 3.6 35B-A3B and Ornith 1.5 35B-A3B are bigger than the car
 - The launcher shows the need and what is free before it starts.
 - When only MTP on would be short of RAM, it suggests MTP off.
 - `llm-tune`'s fit test checks RAM first, and records it if RAM ran short.
+
+### EXL3 models (experimental)
+
+EXL3 is a different way of packing a model into fewer bits, run by a different engine: TabbyAPI with exllamav3, instead of llama.cpp. At about 2 bits per weight it puts the main weights of Qwen3.8-27B, a dense 27B model, on the card: about 6.2 GB at 2.00 bits and 5.4 GB at 1.75. The download is bigger, since it also holds parts that stay off the card, such as the image part. **It is experimental: our tests of it on an 8 GB card are still running, and none of its numbers below are measured yet.**
+
+- **Install the engine** (about 5 GB to download, 9 GB on disk, into `~/exl3`): `bash install-exl3.sh`, or say yes when `setup.sh` asks.
+  - It gets Python 3.12 through uv, so nothing on the system changes.
+  - Every package is pinned to the version the lab installed and checked against its checksum. TabbyAPI is pinned to one git commit.
+  - It needs git and NVIDIA driver 570 or newer.
+- **Get a model** from the launcher's download menu (`d`). Each one is a folder of files, every file checked:
+
+  | Model | Download | The lab's target context on 8 GB |
+  |---|---|---|
+  | Qwen3.8-27B EXL3, 2.00 bits per weight | 9.9 GB | about 40,000 tokens |
+  | Qwen3.8-27B EXL3, 1.75 bits per weight | 9.0 GB | about 80,000 tokens |
+
+- **The launcher** finds EXL3 model folders like the other models, and marks them *EXL3, experimental*.
+  - It asks about MTP (a draft of 2 tokens) and the context, starts TabbyAPI, and opens opencode on it, with the same plugins as the other models.
+  - The K/V cache is 4-bit, and sampling follows the model's own settings: temperature 1.0, top-p 0.95, top-k 20.
+  - If the context does not fit, the launcher shows TabbyAPI's error. Try a smaller one.
+- **Not covered yet:** `llm-tune` measures llama.cpp models only, LL-Dash has no profiles for EXL3, and `llm-launch --attach` does not work with it.
 
 ## Measure your own card: llm-tune
 
