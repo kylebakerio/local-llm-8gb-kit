@@ -857,8 +857,9 @@ def choose_setup(st, kit=None):
 
 
 MODES = ("autonomous", "interactive")
-MODE_ASK = ("Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work "
-            "(autonomous: it won't stop to ask)?")
+MODE_ASK = ("Do you want the agent to work as autonomously as possible (a: good for long or overnight sessions; it makes its "
+            "best assumptions and gets all the work done), or will you be around (i: it asks you the questions that come up "
+            "and goes through design decisions with you; untested)?")
 
 
 def _interactive(p):

@@ -33,7 +33,7 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 - **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to 1.75 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
 - **Every session now has the compaction plugin or the task driver.** In a test without either, after many summaries a model no longer had the bugs it was asked to fix, and asked for them again. If the plugin your setup needs is missing, the launcher uses the other setup, or stops and says what to do.
 - **No cap on the length of one answer.** opencode normally cuts an answer off at 32,000 tokens. The launcher lifts that, as in our tests, so an answer ends only when the model stops or the context is full.
-- **Interactive mode, UNTESTED, off by default.** At each start the launcher now asks: *Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work (autonomous: it won't stop to ask)?* Autonomous is the setup that was tested, and stays the default. Inside opencode, `/interactive` and `/autonomous` switch the current session. See *Interactive mode (untested)*.
+- **Interactive mode, UNTESTED, off by default.** At each start the launcher now asks: *Do you want the agent to work as autonomously as possible (a: good for long or overnight sessions; it makes its best assumptions and gets all the work done), or will you be around (i: it asks you the questions that come up and goes through design decisions with you; untested)?* Autonomous is the setup that was tested, and stays the default. Inside opencode, `/interactive` and `/autonomous` switch the current session. See *Interactive mode (untested)*.
 
 ## One-time setup
 
@@ -142,7 +142,7 @@ It asks, in order:
 For a model that runs partly from system RAM, it also says how much free RAM the model needs and how much there is. If there isn't enough, it warns you before starting.
 
 5. **Task driver:** *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* The default is no, or your answer from last time.
-6. **Interactive or autonomous:** *Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work (autonomous: it won't stop to ask)?* Type `i` or `a`. The default is autonomous, or your answer from last time. See *Interactive mode (untested)*.
+6. **Interactive or autonomous:** *Do you want the agent to work as autonomously as possible (a: good for long or overnight sessions; it makes its best assumptions and gets all the work done), or will you be around (i: it asks you the questions that come up and goes through design decisions with you; untested)?* Type `i` or `a`. The default is autonomous, or your answer from last time. See *Interactive mode (untested)*.
 
 If the model server fails to start:
 - The launcher shows the error.

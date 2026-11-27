@@ -642,8 +642,8 @@ class TestLauncherMode(unittest.TestCase):
             answers[:] = ["i"]; self.assertEqual(L.choose_mode(st), "interactive")
             answers[:] = [""]; self.assertEqual(L.choose_mode(st), "interactive")           # remembered as the next default
             answers[:] = ["maybe", "Autonomous"]; self.assertEqual(L.choose_mode(st), "autonomous")
-        self.assertIn("Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work "
-                      "(autonomous: it won't stop to ask)?", asked[0][0])
+        self.assertIn("work as autonomously as possible", asked[0][0])
+        self.assertIn("will you be around", asked[0][0])
         self.assertEqual([d for _, d in asked], ["autonomous", "autonomous", "interactive", "interactive", "interactive"])
         self.assertEqual(saved[-1]["mode"], "autonomous")
         with mock.patch.object(L, "ask", lambda *a, **k: self.fail("asked without a terminal")):
