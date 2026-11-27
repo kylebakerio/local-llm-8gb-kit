@@ -32,6 +32,9 @@ opencode gets the plugins and settings kit.json names, for these sessions only. 
     compaction-anchor plugin: after a summary, the original request word for word and a task checklist.
   - task driver (asked at each start, off unless you turn it on): opencode-task-driver 0.4.1 in focus mode (a request with
     several problems is split into tasks, worked one at a time) with the v1.1 prompt.
+  - both also get plugins/interactive.js (UNTESTED), and the launcher asks at each start whether you will be at the
+    keyboard (interactive: the model asks when it needs a decision) or leaving it to work (autonomous, the tested
+    behaviour and the default: the plugin then changes nothing). /interactive and /autonomous switch it inside opencode.
 A newer tested setup arrives as a kit update (--update).
 EXL3 models (experimental): a folder whose config.json says quant_method "exl3" runs on TabbyAPI + exllamav3 instead
 (install-exl3.sh installs them into ~/exl3); the launcher writes TabbyAPI's config.yml with the lab's settings.
@@ -853,6 +856,45 @@ def choose_setup(st, kit=None):
     return sets[0]["id"]
 
 
+MODES = ("autonomous", "interactive")
+MODE_ASK = ("Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work "
+            "(autonomous: it won't stop to ask)?")
+
+
+def _interactive(p):
+    return os.path.basename(p.get("file") or p.get("url") or "").lower().startswith("interactive")
+
+
+def kit_mode_default(kit=None):
+    """The mode kit.json starts a fresh install in (the interactive plugin's 'default' option), or None when no setup
+    has that plugin. autonomous is the tested behaviour: interactive is untested."""
+    for s in kit_setups(kit):
+        for p in s.get("plugins", []):
+            if _interactive(p):
+                d = (p.get("options") or {}).get("default")
+                return d if d in MODES else "autonomous"
+    return None
+
+
+def choose_mode(st, kit=None):
+    """Interactive or autonomous for this session, asked at each start when the kit has the interactive plugin (None when it
+    has not); the answer is remembered as the next default."""
+    start = kit_mode_default(kit)
+    if start is None: return None
+    cur = st.get("mode") if st.get("mode") in MODES else start
+    if not sys.stdin.isatty(): return cur
+    while True:
+        v = ask(f"{B}{MODE_ASK}{N} (i/a)", default=cur).strip().lower()
+        m = next((x for x in MODES if v and x.startswith(v)), None)
+        if m: break
+        print("   type i (interactive) or a (autonomous)")
+    st["mode"] = m; save_state(st)
+    return m
+
+
+def mode_label(mode):
+    return {"interactive": ", interactive (untested)", "autonomous": ", autonomous"}.get(mode, "")
+
 
 def _keeper(p):
     src = (p.get("file") or p.get("url") or "").lower()
@@ -879,18 +921,21 @@ def usable_setup(setup_id, kit=None):
                      f"llm-launch --update to restore the kit's files.{N}")
 
 
-def session_config(prov, setup_id=None):
+def session_config(prov, setup_id=None, mode=None):
     """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the plugins of
     the chosen kit.json setup (today's default: the v1.1 system prompt in place of opencode's own instructions, your
     project's AGENTS.md kept, "Continue with the task." after a summary, and the compaction-anchor plugin's checklist and
-    reinsert parts), kit.json's opencode settings (the compaction reserve used in the tests), plus the model entry (in
-    case opencode.json could not be edited)."""
+    reinsert parts; every setup also has the untested interactive plugin, started in `mode` when given), kit.json's
+    opencode settings (the compaction reserve used in the tests), plus the model entry (in case opencode.json could not
+    be edited)."""
     kit = load_kit()
     paths = {(p.get("file") or p.get("url")): path for p, path in fetch_plugins(kit)}
     plugins = []
     for p in setup_of(setup_id, kit).get("plugins", []):
         path = paths.get(p.get("file") or p.get("url"))
-        if path: plugins.append(["file://" + path, _subst(p.get("options") or {})])
+        opts = _subst(p.get("options") or {})
+        if _interactive(p) and mode in MODES: opts = dict(opts, default=mode)
+        if path: plugins.append(["file://" + path, opts])
         else: print(f"{R}   this session runs without: {p['name']}{N}")
     cfg = {"provider": {PROVIDER: prov}, "plugin": plugins}
     cfg.update(_subst(kit.get("opencode_config") or {}))
@@ -1493,10 +1538,11 @@ def attach(port):
     print(f"Model server on port {port}: {name}, {ctx:,} tokens of context")
     st = load_state()
     sid = usable_setup(choose_setup(st))
+    mode = choose_mode(st)
     prov = update_opencode_config(mid, f"{name} ({ctx // 1000}k)", ctx, port)
-    env = opencode_env(session_config(prov, sid))
+    env = opencode_env(session_config(prov, sid, mode))
     print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}")
-    print(f"   opencode setup: {setup_of(sid).get('name')}  {D}(kit.json){N}\n")
+    print(f"   opencode setup: {setup_of(sid).get('name')}{mode_label(mode)}  {D}(kit.json){N}\n")
     return subprocess.call([opencode_bin(), "-m", f"{PROVIDER}/{mid}"], env=env)
 
 
@@ -1542,6 +1588,7 @@ def main():
     while True:
         c = choose_exl3(st, model) if exl else choose(st, model)
         sid = usable_setup(choose_setup(st))
+        mode = choose_mode(st)
         port = DEFAULT_PORT
         while not port_free(port): port += 1
         log = os.path.join(LOG_DIR, f"{'tabbyapi' if exl else 'llama-server'}-{time.strftime('%Y%m%d-%H%M%S')}.log")
@@ -1566,9 +1613,9 @@ def main():
         mem["mtp"] = c["mtp"]; mem["images_gpu"] = c["proj_gpu"]; mem.setdefault("ctx", {})[c["key"]] = c["ctx"]
         save_state(st)
         prov = update_opencode_config(mid, f"{model['name']} ({c['ctx'] // 1000}k)", c["ctx"], port)
-        env = opencode_env(session_config(prov, sid))
+        env = opencode_env(session_config(prov, sid, mode))
         print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}  {D}(server log: {log}){N}")
-        print(f"   opencode setup: {setup_of(sid).get('name')}  {D}(kit.json){N}\n")
+        print(f"   opencode setup: {setup_of(sid).get('name')}{mode_label(mode)}  {D}(kit.json){N}\n")
         time.sleep(1)
         try:
             rc = subprocess.call([opencode_bin(), "-m", f"{PROVIDER}/{mid}"], env=env)

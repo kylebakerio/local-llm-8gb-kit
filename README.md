@@ -33,6 +33,7 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 - **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to 1.75 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
 - **Every session now has the compaction plugin or the task driver.** In a test without either, after many summaries a model no longer had the bugs it was asked to fix, and asked for them again. If the plugin your setup needs is missing, the launcher uses the other setup, or stops and says what to do.
 - **No cap on the length of one answer.** opencode normally cuts an answer off at 32,000 tokens. The launcher lifts that, as in our tests, so an answer ends only when the model stops or the context is full.
+- **Interactive mode, UNTESTED, off by default.** At each start the launcher now asks: *Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work (autonomous: it won't stop to ask)?* Autonomous is the setup that was tested, and stays the default. Inside opencode, `/interactive` and `/autonomous` switch the current session. See *Interactive mode (untested)*.
 
 ## One-time setup
 
@@ -141,6 +142,7 @@ It asks, in order:
 For a model that runs partly from system RAM, it also says how much free RAM the model needs and how much there is. If there isn't enough, it warns you before starting.
 
 5. **Task driver:** *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* The default is no, or your answer from last time.
+6. **Interactive or autonomous:** *Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work (autonomous: it won't stop to ask)?* Type `i` or `a`. The default is autonomous, or your answer from last time. See *Interactive mode (untested)*.
 
 If the model server fails to start:
 - The launcher shows the error.
@@ -148,6 +150,22 @@ If the model server fails to start:
 - It offers to try again.
 
 When you quit opencode, it asks whether to stop the server.
+
+### Interactive mode (untested)
+
+The kit was tested in **autonomous** mode only: the model is given the work and keeps going until it is done, asking only when it cannot continue. That suits a long list left to run overnight. **Interactive** is for when you are around and would rather be asked than have it guess. It has not been tested at all, so autonomous stays the default.
+
+- **Switching:** answer `i` to the launcher's question, or type `/interactive` in opencode. `/autonomous` switches back. A switch applies to the current session; a new session (`/new`) starts in the mode you chose in the launcher.
+- **What it changes:** in interactive mode, a short note is added at the end of the system prompt. It tells the model that you are at the keyboard, and asks it:
+  - to look at the code first, then ask its questions all at once, early, before the long work (with a list of tasks, before starting them);
+  - to go on with the parts that do not depend on your answers;
+  - to ask before anything destructive or hard to undo;
+  - never to ask whether to keep going, or to have you paste again what is already in the conversation;
+  - once you have answered, to keep going until the work is done.
+- **In autonomous mode** the plugin changes nothing the model sees: it gets exactly what it would get without the plugin.
+- **A switch costs one slow reply.** It changes the system prompt, which comes before the whole conversation, so the next reply reads the conversation again. On a model that runs partly from system RAM, that can take minutes in a long session.
+- **The command sends a message.** A notice shows which mode is on. The model gets a one-line note that the mode changed, replies, and carries on with any work in progress.
+- **With the task driver on, use autonomous for now.** The driver was built for unattended work. It can prompt the model to carry on before you answer, and it takes your answer for a new request.
 
 ### Models that run partly from system RAM
 
@@ -379,10 +397,12 @@ The Uncensored Bonsai 2.5 edit runs with Bonsai 2.5's settings.
     - a task checklist that marks each item of the request as done, in progress, or not started. The model is asked to make its todo list match it.
   - Each time a session is summarized, the plugin also saves the whole conversation so far to a text file in `~/.local/share/opencode/history/`.
   - **No cap on the length of one answer** (`OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`). The model entry's output limit is the whole context.
+  - **The interactive-mode plugin** (`plugins/interactive.js`, untested), started in the mode you chose. In autonomous mode it changes nothing the model sees. It adds the `/interactive` and `/autonomous` commands, and records each switch in `~/.local/share/opencode/interactive/`.
 - **With the task driver turned on,** the session gets a different set:
   - the same v1.1 system prompt;
   - the **task driver** (`plugins/opencode-task-driver-0.4.1.js`, focus mode). When a request holds several separate problems, it has the model file them as tasks, and works them one at a time, each on a clean slate with a short handoff from the tasks before. After a summary it brings back the current task, and it handles the turn after the summary itself. A single-problem request runs as one task.
   - The compaction-anchor parts are left out, because the task driver does that work for each task.
+  - the same interactive-mode plugin.
 - **`~/.config/llm-launch/`:** your choices, downloaded plugins, and `llm-tune`'s measurements.
 - **`~/models/<repo>/`:** the models you download from the launcher's menu.
 - **`~/.cache/llm-launch/`:** the model server's logs.

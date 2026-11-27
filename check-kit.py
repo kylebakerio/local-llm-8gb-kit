@@ -20,6 +20,11 @@ Rules:
       * each plugin appears once;
       * every setup has compaction-anchor with its reinsert part, or a task driver: without either, a long session
         can lose the request to a summary (Kyle 11-26).
+  - One plugin the harness never ran is allowed beside a tested set: interactive.js, whose mode switched off ("autonomous")
+    changes nothing the model sees. Its kit.json entry says so with "untested": true, its options.default is
+    "autonomous" (the launcher passes the person's choice at each start), it appears at most once per setup, and it
+    counts as neither the reinsert part nor a task driver. Its file holds text the model reads, so the whole file is
+    checked for the words above. Any other plugin is refused, "untested" or not.
 A changed prompt text needs a new file name: the setup name then tells the sessions apart.
 """
 import hashlib, json, os, re, sys, urllib.request
@@ -34,11 +39,12 @@ def read(path, binary=False):
 
 
 def kind(p):
-    """compaction-anchor / system-prompt / task-driver / other, from the plugin's file or url."""
+    """compaction-anchor / system-prompt / task-driver / interactive / other, from the plugin's file or url."""
     src = os.path.basename(p.get("file") or p.get("url") or "")
     if "compaction-anchor" in src or "session-history" in src: return "compaction-anchor"
     if "system-prompt" in src: return "system-prompt"
     if "task-driver" in src: return "task-driver"
+    if src.startswith("interactive"): return "interactive"
     return "other"
 
 
@@ -50,10 +56,15 @@ def check_plugin(p, fetch, bad, sha_cache):
         elif not p.get("sha256"): bad.append(f"{name}: a file plugin needs its sha256 (the tested build)")
         elif hashlib.sha256(read(path, True)).hexdigest() != p["sha256"]:
             bad.append(f"{name}: {p['file']} does not match its sha256")
+        if os.path.isfile(path) and kind(p) == "interactive" and BANNED.search(read(path)):
+            bad.append(f"{name}: {p['file']} mentions the benchmark (the model reads the text it adds)")
     elif p.get("url") and p.get("sha256"):
         if fetch and p["url"] not in sha_cache:
-            sha_cache[p["url"]] = hashlib.sha256(urllib.request.urlopen(p["url"], timeout=60).read()).hexdigest()
-        if fetch and sha_cache[p["url"]] != p["sha256"]: bad.append(f"{name}: the download does not match its sha256")
+            body = urllib.request.urlopen(p["url"], timeout=60).read()
+            sha_cache[p["url"]] = (hashlib.sha256(body).hexdigest(), bool(BANNED.search(body.decode("utf-8", "replace"))))
+        if fetch and sha_cache[p["url"]][0] != p["sha256"]: bad.append(f"{name}: the download does not match its sha256")
+        if fetch and kind(p) == "interactive" and sha_cache[p["url"]][1]:
+            bad.append(f"{name}: the download mentions the benchmark (the model reads the text it adds)")
     else:
         bad.append(f"{name}: needs 'file' (+ 'sha256'), or 'url' and 'sha256'")
     for v in re.findall(r'"(\{kit\}/[^"]+)"', json.dumps(p.get("options") or {})):
@@ -98,6 +109,12 @@ def check_setup(s, bad):
         bad.append(f"setup {sid}: needs compaction-anchor with reinsert, or a task driver (without either, a long session can lose the request to a summary)")
     other = [p.get("name", "?") for p in ps if kind(p) == "other"]
     if other: bad.append(f"setup {sid}: plugins no tested setup used: {', '.join(other)}")
+    for p in ps:
+        if kind(p) != "interactive": continue
+        if p.get("untested") is not True:
+            bad.append(f"setup {sid}: {p.get('name', '?')} was never tested: its entry needs \"untested\": true")
+        if (p.get("options") or {}).get("default") != "autonomous":
+            bad.append(f"setup {sid}: {p.get('name', '?')} needs options.default \"autonomous\" (off: the tested behaviour; the launcher passes the person's choice)")
 
 
 def check(kit, fetch=False):

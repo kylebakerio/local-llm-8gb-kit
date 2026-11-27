@@ -1,8 +1,8 @@
 """Unit tests for the launcher and llm-tune (no GPU, no network, no model server): python3 -m unittest discover -s tests
 
 They use tiny synthetic GGUF files (a real header, sparse data) and stand-ins for nvidia-smi, /proc/meminfo and
-llama-server, so they run anywhere."""
-import importlib.util, json, os, struct, sys, tempfile, unittest
+llama-server, so they run anywhere. The interactive plugin's tests run it under node (skipped when node is missing)."""
+import importlib.util, json, os, shutil, struct, subprocess, sys, tempfile, unittest
 from unittest import mock
 
 KIT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -289,6 +289,64 @@ class TestKeeperPlugins(unittest.TestCase):
             self.assertTrue(any("whitespace" in x for x in out), out)
 
 
+class TestCheckKitInteractive(unittest.TestCase):
+    """The untested interactive plugin rides along in both tested sets, only with its "untested" marker and off by default;
+    it never stands in for the reinsert part or the task driver, and other plugins stay refused."""
+    A, SP_CONT, SP, TD = TestCheckKit.A, TestCheckKit.SP_CONT, TestCheckKit.SP, TestCheckKit.TD
+    IA = {"name": "ia", "file": "plugins/interactive.js", "untested": True, "options": {"default": "autonomous"}}
+
+    def bad(self, *plugins):
+        out = []; C.check_setup({"id": "x", "plugins": list(plugins)}, out); return out
+
+    def test_both_tested_sets_pass_with_it(self):
+        self.assertEqual(self.bad(self.A, self.SP_CONT, self.IA), [])
+        self.assertEqual(self.bad(self.SP, self.TD, self.IA), [])
+
+    def test_it_needs_the_untested_marker_and_autonomous_as_default(self):
+        for ia in (dict(self.IA, untested=None), {k: v for k, v in self.IA.items() if k != "untested"}, dict(self.IA, untested="yes"),
+                   dict(self.IA, options={"default": "interactive"}), dict(self.IA, options={})):
+            self.assertTrue(self.bad(self.A, self.SP_CONT, ia), ia)
+
+    def test_the_old_bad_combinations_stay_refused_with_it(self):
+        slim = {"file": "plugins/compaction-anchor.js", "options": {"parts": ["slim"]}}
+        nsa = {"file": "plugins/compaction-anchor.js", "options": {"parts": ["checklist", "no-stop-and-ask"]}}
+        for combo in [(slim, self.SP), (self.SP_CONT, self.TD), (self.A, self.SP, self.TD), (self.A, self.TD), (nsa, self.SP_CONT),
+                      (self.SP, self.SP_CONT), (dict(self.TD, options={"mode": "tasks"}), self.SP), (self.SP, {"file": "plugins/something-else.js"}),
+                      ({"file": "plugins/compaction-anchor.js"}, self.SP_CONT), (self.A, self.SP_CONT, self.IA, self.IA)]:
+            self.assertTrue(self.bad(*combo, self.IA), [p.get("options") for p in combo])
+
+    def test_it_is_not_the_reinsert_part_or_a_task_driver(self):
+        for combo in [(self.IA,), (self.SP_CONT, self.IA), (self.SP, self.IA)]:
+            out = self.bad(*combo)
+            self.assertTrue(any("reinsert" in x and "task driver" in x for x in out), (combo, out))
+
+    def test_the_untested_marker_does_not_let_other_plugins_in(self):
+        out = self.bad(self.A, self.SP_CONT, {"name": "x", "file": "plugins/something-else.js", "untested": True, "options": {"default": "autonomous"}})
+        self.assertTrue(any("no tested setup used" in x for x in out), out)
+
+    def test_the_kit_has_it_in_every_setup_off_by_default(self):
+        with open(os.path.join(KIT, "kit.json")) as f: kit = json.load(f)
+        for s in kit["setups"]:
+            ia = [p for p in s["plugins"] if p.get("file") == "plugins/interactive.js"]
+            self.assertEqual(len(ia), 1, s["id"])
+            self.assertEqual((ia[0]["untested"], ia[0]["options"]), (True, {"default": "autonomous"}))
+            self.assertIs(s["plugins"][-1], ia[0])      # last: after the task driver's planning block, whose filing it asks about
+
+    def test_its_file_is_checked_for_the_banned_words(self):
+        """The plugin's text goes to the model and the repo is public: the whole file, comments included, is checked."""
+        import hashlib
+        with tempfile.TemporaryDirectory() as t, mock.patch.object(C, "KIT", t):
+            os.makedirs(os.path.join(t, "plugins"))
+            body = b"// built for the benchmark\nexport const X = async () => ({});\n"
+            with open(os.path.join(t, "plugins", "interactive.js"), "wb") as f: f.write(body)
+            out = []; C.check_plugin(dict(self.IA, sha256=hashlib.sha256(body).hexdigest()), False, out, {})
+            self.assertTrue(any("mentions the benchmark" in x for x in out), out)
+        with open(os.path.join(KIT, "kit.json")) as f:
+            real = next(p for p in json.load(f)["setups"][0]["plugins"] if p["file"] == "plugins/interactive.js")
+        out = []; C.check_plugin(real, False, out, {})
+        self.assertEqual(out, [])
+
+
 class TestEXL3(unittest.TestCase):
     """The EXL3 path (experimental): detection, TabbyAPI's settings, its health answer. TabbyAPI itself is not run here."""
     def make(self, d, size=8570690830):
@@ -435,6 +493,168 @@ class TestOutputCap(unittest.TestCase):
         self.assertEqual(prov["models"]["m"]["limit"], {"context": 88064, "input": 88064, "output": 88064})
         src = open(os.path.join(KIT, "llm-launch.py")).read()
         self.assertEqual(src.count("subprocess.call([opencode_bin()"), src.count("env=env)"))   # every opencode start gets that env
+
+
+NODE = shutil.which("node")
+# Loads plugins as opencode does (each export called with (input, options)) and replays opencode's hook calls.
+PLUGIN_RUNNER = r"""
+import fs from "node:fs"; import path from "node:path"; import { pathToFileURL } from "node:url";
+const spec = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const hooks = [];
+for (const [file, opts] of spec.plugins) {
+  const dst = path.join(spec.tmp, hooks.length + "-" + path.basename(file).replace(/\\.js$/, ".mjs"));   // .mjs: an ES module on any node
+  fs.copyFileSync(file, dst);
+  for (const f of Object.values(await import(pathToFileURL(dst).href))) hooks.push(await f({ directory: spec.tmp }, opts));
+}
+const each = async (name, input, output) => { for (const h of hooks) if (h[name]) await h[name](input, output); return output; };
+const out = [];
+for (const [op, ...a] of spec.ops) {
+  if (op === "keys") out.push(hooks.map((h) => Object.keys(h).sort()));
+  else if (op === "config") { for (const h of hooks) if (h.config) await h.config(a[0]); out.push(a[0]); }
+  else if (op === "event") { await each("event", { event: a[0] }, undefined); out.push(null); }
+  else if (op === "system") out.push((await each("experimental.chat.system.transform", { sessionID: a[0], model: {} }, { system: a[1] })).system);
+  else if (op === "command") { const parts = a[2], o = { parts }; await each("command.execute.before", { command: a[0], sessionID: a[1], arguments: "" }, o); out.push({ same: o.parts === parts, parts }); }
+}
+console.log(JSON.stringify(out));
+"""
+# opencode 1.18.34's system message for the main agent (its own prompt, the environment lines, the skills), the title
+# writer's and the summarizer's (their own prompt only)
+MAIN = ("You are opencode, an interactive CLI tool that helps users with software engineering tasks.\n\nBe concise.\n"
+        "You are powered by the model named m. The exact model ID is llama-local/m\n"
+        "Here is some useful information about the environment you are running in:\n<env>\n  Working directory: /p\n</env>\n"
+        "Skills provide specialized instructions and workflows for specific tasks.")
+TITLE = "You are a title generator. You output ONLY a thread title. Nothing else."
+SUMMARY = "You are a helpful AI assistant tasked with summarizing conversations."
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class TestInteractivePlugin(unittest.TestCase):
+    """plugins/interactive.js (untested mode): off, it changes nothing the model sees; on, it appends its block to the
+    main agent's one system message; /interactive and /autonomous switch the session."""
+    IA = os.path.join(KIT, "plugins", "interactive.js")
+    SP = os.path.join(KIT, "plugins", "system-prompt.js")
+
+    def run_ops(self, plugins, ops):
+        with tempfile.TemporaryDirectory() as t:
+            plugins = [[f, dict(o, dir=t)] for f, o in plugins]          # their event logs go here, not under ~
+            spec = os.path.join(t, "spec.json")
+            with open(spec, "w") as f: json.dump({"tmp": t, "plugins": plugins, "ops": ops}, f)
+            r = subprocess.run([NODE, "--no-warnings", "--input-type=module", "-e", PLUGIN_RUNNER, spec], capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def ia(self, default): return [self.IA, {"default": default}]
+    def sp(self): return [self.SP, {"file": os.path.join(KIT, "prompts", "v1-1.md"), "continueText": "Continue with the task."}]
+
+    def block(self):
+        main = self.run_ops([self.ia("interactive")], [["system", "s1", [MAIN]]])[0][0]
+        self.assertTrue(main.startswith(MAIN + "\n\n"))
+        return main[len(MAIN) + 2:]
+
+    def test_off_adds_nothing(self):
+        ops = [["config", {}], ["system", "s1", [MAIN]], ["system", "s1", [TITLE]], ["system", "s1", [SUMMARY]],
+               ["command", "autonomous", "s1", [{"type": "text", "text": "x"}]], ["system", "s1", [MAIN]], ["system", None, [MAIN]]]
+        out = self.run_ops([self.ia("autonomous")], ops)
+        self.assertEqual(out[1:4], [[MAIN], [TITLE], [SUMMARY]])
+        self.assertEqual(out[5:], [[MAIN], [MAIN]])
+        self.assertEqual(self.run_ops([self.ia("bogus")], [["system", "s1", [MAIN]]]), [[MAIN]])      # an unknown default: off
+        # with the v1.1 prompt plugin, in kit.json's order: exactly what the prompt plugin alone sends
+        alone = self.run_ops([self.sp()], [["system", "s1", [MAIN]], ["system", "s1", [TITLE]]])
+        self.assertEqual(self.run_ops([self.sp(), self.ia("autonomous")], [["system", "s1", [MAIN]], ["system", "s1", [TITLE]]]), alone)
+        self.assertNotEqual(alone[0], [MAIN])                                                       # (the prompt plugin did act)
+        # no hook that could change messages, tools or parameters
+        self.assertEqual(self.run_ops([self.ia("autonomous")], [["keys"]])[0][0],
+                         sorted(["config", "event", "command.execute.before", "experimental.chat.system.transform"]))
+
+    def test_on_appends_the_block(self):
+        block = self.block()
+        self.assertTrue(block.startswith("<interaction>\n") and block.endswith("\n</interaction>"), block)
+        self.assertLess(len(block), 1200)
+        self.assertIsNone(C.BANNED.search(block))
+        ops = [["system", "s1", [MAIN]], ["system", "s1", [MAIN]], ["system", "s1", [TITLE]], ["system", "s1", [SUMMARY]], ["system", None, [MAIN]],
+               ["event", {"type": "session.created", "properties": {"info": {"id": "child", "parentID": "s1"}}}], ["system", "child", [MAIN]]]
+        out = self.run_ops([self.ia("interactive")], ops)
+        self.assertEqual(out[0], [MAIN + "\n\n" + block])                       # one system message, the block at its end
+        self.assertEqual(out[1], out[0])                                          # each request once
+        self.assertEqual(out[2:5], [[TITLE], [SUMMARY], [MAIN]])                  # not the title writer, the summarizer, no session
+        self.assertEqual(out[6], [MAIN])                                          # not a sub-agent's session
+        # after the v1.1 prompt plugin: its text, then the block
+        alone = self.run_ops([self.sp()], [["system", "s1", [MAIN]]])[0][0]
+        self.assertEqual(self.run_ops([self.sp(), self.ia("interactive")], [["system", "s1", [MAIN]]])[0], [alone + "\n\n" + block])
+
+    def test_the_commands_switch_the_session(self):
+        cfg = self.run_ops([self.ia("autonomous")], [["config", {"command": {"mine": {"template": "m"}}}]])[0]["command"]
+        self.assertEqual(sorted(cfg), ["autonomous", "interactive", "mine"])
+        self.assertTrue(all(cfg[k]["template"] and cfg[k]["description"] for k in ("autonomous", "interactive")))
+        block = self.block()
+        part = lambda: [{"type": "text", "text": "template text"}]
+        ops = [["config", {}], ["system", "s1", [MAIN]],
+               ["command", "interactive", "s1", part()], ["system", "s1", [MAIN]], ["system", "s2", [MAIN]],
+               ["command", "autonomous", "s1", part()], ["system", "s1", [MAIN]],
+               ["command", "init", "s1", part()]]
+        out = self.run_ops([self.ia("autonomous")], ops)
+        self.assertEqual(out[1], [MAIN])
+        on = out[2]
+        self.assertTrue(on["same"])                                               # opencode keeps using its own array
+        self.assertEqual(len(on["parts"]), 1)
+        self.assertEqual((on["parts"][0]["type"], on["parts"][0]["synthetic"]), ("text", True))   # a task driver skips it
+        self.assertIn("interactive", on["parts"][0]["text"]); self.assertNotIn("\n", on["parts"][0]["text"])
+        self.assertEqual(out[3], [MAIN + "\n\n" + block])                       # switched on for this session
+        self.assertEqual(out[4], [MAIN])                                          # not for another one
+        self.assertIn("autonomous", out[5]["parts"][0]["text"])
+        self.assertEqual(out[6], [MAIN])                                          # off again
+        self.assertEqual(out[7]["parts"], part())                                 # other commands untouched
+        # on by default, /autonomous turns it off for the session
+        out = self.run_ops([self.ia("interactive")], [["config", {}], ["command", "autonomous", "s1", part()], ["system", "s1", [MAIN]], ["system", "s2", [MAIN]]])
+        self.assertEqual(out[2:], [[MAIN], [MAIN + "\n\n" + block]])
+        # a person's own command of the same name is theirs: left alone
+        out = self.run_ops([self.ia("autonomous")], [["config", {"command": {"interactive": {"template": "mine"}}}],
+                                                     ["command", "interactive", "s1", part()], ["system", "s1", [MAIN]]])
+        self.assertEqual((out[0]["command"]["interactive"], out[1]["parts"], out[2]), ({"template": "mine"}, part(), [MAIN]))
+
+
+class TestLauncherMode(unittest.TestCase):
+    """The launcher asks interactive or autonomous at each start (remembered), and starts the plugin in that mode in every
+    setup; a fresh install starts autonomous, the tested behaviour."""
+    PROV = {"npm": "@ai-sdk/openai-compatible", "models": {}}
+
+    def plugin_opts(self, sid, mode):
+        cfg = json.loads(L.session_config(self.PROV, sid, mode))
+        return [o for f, o in cfg["plugin"] if f.endswith("/plugins/interactive.js")]
+
+    def test_every_setup_gets_the_plugin_with_the_chosen_mode(self):
+        for sid in ("standard", "task-driver"):
+            for mode in ("interactive", "autonomous"):
+                self.assertEqual(self.plugin_opts(sid, mode), [{"default": mode}], (sid, mode))
+            self.assertEqual(self.plugin_opts(sid, None), [{"default": "autonomous"}])    # no answer: kit.json's default
+        self.assertEqual(L.kit_mode_default(), "autonomous")
+
+    def test_the_question_and_its_remembered_answer(self):
+        class TTY:
+            def isatty(self): return True
+        asked, answers, saved = [], [], []
+        def fake_ask(q, default=None):
+            asked.append((q, default)); v = answers.pop(0); return v if v else default
+        st = {}
+        with mock.patch.object(L.sys, "stdin", TTY()), mock.patch.object(L, "ask", fake_ask), mock.patch.object(L, "save_state", lambda s: saved.append(dict(s))), \
+             mock.patch("builtins.print"):
+            answers[:] = [""]; self.assertEqual(L.choose_mode(st), "autonomous")            # a fresh install: autonomous
+            answers[:] = ["i"]; self.assertEqual(L.choose_mode(st), "interactive")
+            answers[:] = [""]; self.assertEqual(L.choose_mode(st), "interactive")           # remembered as the next default
+            answers[:] = ["maybe", "Autonomous"]; self.assertEqual(L.choose_mode(st), "autonomous")
+        self.assertIn("Will you be at the keyboard (interactive: it asks when it needs a decision) or leaving it to work "
+                      "(autonomous: it won't stop to ask)?", asked[0][0])
+        self.assertEqual([d for _, d in asked], ["autonomous", "autonomous", "interactive", "interactive", "interactive"])
+        self.assertEqual(saved[-1]["mode"], "autonomous")
+        with mock.patch.object(L, "ask", lambda *a, **k: self.fail("asked without a terminal")):
+            self.assertEqual(L.choose_mode({"mode": "interactive"}), "interactive")        # no terminal: the remembered mode
+        self.assertIsNone(L.choose_mode({}, {"setups": [{"id": "s", "default": True, "plugins": [{"file": "plugins/system-prompt.js"}]}]}))
+
+    def test_the_mode_reaches_opencode_and_the_printed_setup_line(self):
+        with open(os.path.join(KIT, "llm-launch.py")) as f: src = f.read()
+        self.assertEqual(src.count("session_config(prov, sid, mode)"), 2)               # the launch and --attach
+        self.assertEqual(src.count("mode = choose_mode(st)"), 2)
+        self.assertEqual((L.mode_label("interactive"), L.mode_label("autonomous"), L.mode_label(None)), (", interactive (untested)", ", autonomous", ""))
 
 
 if __name__ == "__main__":
