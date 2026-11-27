@@ -34,8 +34,8 @@ opencode gets the plugins and settings kit.json names, for these sessions only. 
     several problems is split into tasks, worked one at a time) with the v1.2 prompt.
   - both also get plugins/interaction-mode.js: the launcher asks at each start how the agent should work: autonomous
     (the tested mode and the default: the prompt exactly as tested), plan first (it asks its questions up front, then
-    works on its own; untested) or interactive (it asks as questions come up; untested). /autonomous, /plan-first and
-    /interactive switch it inside opencode.
+    works on its own; untested) or interactive (it asks its questions up front and as they come up; untested).
+    /autonomous, /plan-first and /interactive switch it inside opencode.
 A newer tested setup arrives as a kit update (--update).
 EXL3 models (experimental): a folder whose config.json says quant_method "exl3" runs on TabbyAPI + exllamav3 instead
 (install-exl3.sh installs them into ~/exl3); the launcher writes TabbyAPI's config.yml with the lab's settings.
@@ -863,7 +863,7 @@ MODE_ASK = [
     "  (a) as autonomously as possible: good for long or overnight sessions; it makes sensible assumptions, gets all the work",
     "      done, and lists its assumptions and any blocking questions at the end",
     "  (p) plan first: it asks its questions up front, then works on its own (untested)",
-    "  (i) interactive: it asks questions as they come up (untested)",
+    "  (i) interactive: it asks its questions up front and as they come up (untested)",
 ]
 
 

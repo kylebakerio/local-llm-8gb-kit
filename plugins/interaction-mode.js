@@ -5,7 +5,7 @@
 // this plugin leaves the system prompt exactly as it is. The other two modes replace that section's lines (its heading
 // and every other section stay as they are), so the prompt never says both "don't ask" and "ask":
 //   interactive  the user is at the keyboard: look first, ask early and all at once, go on with what does not depend on
-//                the answers, ask before anything destructive.
+//                the answers, ask new questions as they come up, ask before anything destructive.
 //   plan-first   the user is here now but will be away: ask any questions in one round before changing anything, then
 //                work without asking. The planning window ends at the first file-changing tool call (edit, write,
 //                patch, or a bash command that plainly writes files), at file_tasks / add_task, when the user answers
@@ -43,6 +43,7 @@ const SECTIONS = {
     "- The user is at the keyboard and can answer questions.",
     "- If the request leaves a choice only the user can make (how something should behave or look, data that matters) or something in it is genuinely unclear, first take a quick look at the code so your questions are specific, then ask them all at once, early, before the long work. With a list of tasks, ask before you file the tasks or start on them.",
     "- After asking, go on with the parts that do not depend on the answers.",
+    "- If new questions come up while you work, ask them then, and keep going with the work that does not depend on the answers.",
     "- Ask before anything destructive or hard to undo.",
     "- Never ask whether to keep going, and never ask the user to paste or explain again something already in this conversation.",
     "- Once your questions are answered, keep going until all of the work is done.",
@@ -50,15 +51,15 @@ const SECTIONS = {
   "plan-first": [
     "- The user is here now but will be away while you work.",
     "- Before changing anything, take a quick look at the code. If the request leaves choices only the user can make or something in it is unclear, ask all your questions in one round, then wait for the answers. With a list of tasks, ask before you file the tasks.",
-    "- After that round, or if you have no questions, work without asking anything more: make the most sensible assumption, note it, and keep going. If a part cannot be done without the user, finish all the other parts first.",
+    "- After that round, or if you have no questions, work without asking anything more: make the most sensible assumption, note it, and keep going. If a part cannot be done without the user, finish all the requested work you can without them.",
   ].join("\n"),
 };
 const REFUSED = "Questions wait until the end: make the most sensible assumption, note it, and keep going; list it in your final message.";
 const COMMANDS = {
   interactive: {
     mode: "interactive",
-    description: "ask me questions as they come up (untested)",
-    toast: "Interactive (untested): it asks questions as they come up",
+    description: "ask me your questions up front and as they come up (untested)",
+    toast: "Interactive (untested): it asks its questions up front and as they come up",
     note: "Mode changed to interactive: I am at the keyboard and can answer questions. Carry on with any work in progress.",
   },
   "plan-first": {

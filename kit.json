@@ -38,13 +38,13 @@
           "name": "system prompt v1.2 (in place of opencode's own instructions; \"Continue with the task.\" after a summary)",
           "file": "plugins/system-prompt.js",
           "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
-          "prompt_sha256": "22f9cf1d4f6f291ff93548e7c8412db2f9934ae94cfbde3623a8bf897650a4ef",
+          "prompt_sha256": "3583abaede2d9155461515d5f826c4bb66912433fc1ff173edd72c81abb35885",
           "options": {"file": "{kit}/prompts/v1-2.md", "continueText": "Continue with the task."}
         },
         {
           "name": "interaction modes (autonomous = the v1.2 prompt exactly, the tested mode and the default; plan-first and interactive UNTESTED: they replace its Questions section; the launcher asks at each start, /autonomous /plan-first /interactive switch)",
           "file": "plugins/interaction-mode.js",
-          "sha256": "d4cccb98a5d9025c10a9f87f753afba88d2f499d70c2d2ead47cdb22e8737f93",
+          "sha256": "190578976244d2d156bd8c156a6f9c646c73a0e775527d73fbd45d2fce12cfba",
           "untested": true,
           "options": {"default": "autonomous"}
         }
@@ -59,7 +59,7 @@
           "name": "system prompt v1.2 (in place of opencode's own instructions; the task driver handles the turn after a summary)",
           "file": "plugins/system-prompt.js",
           "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
-          "prompt_sha256": "22f9cf1d4f6f291ff93548e7c8412db2f9934ae94cfbde3623a8bf897650a4ef",
+          "prompt_sha256": "3583abaede2d9155461515d5f826c4bb66912433fc1ff173edd72c81abb35885",
           "options": {"file": "{kit}/prompts/v1-2.md"}
         },
         {
@@ -71,7 +71,7 @@
         {
           "name": "interaction modes (autonomous = the v1.2 prompt exactly, the tested mode and the default; plan-first and interactive UNTESTED: they replace its Questions section; the launcher asks at each start, /autonomous /plan-first /interactive switch)",
           "file": "plugins/interaction-mode.js",
-          "sha256": "d4cccb98a5d9025c10a9f87f753afba88d2f499d70c2d2ead47cdb22e8737f93",
+          "sha256": "190578976244d2d156bd8c156a6f9c646c73a0e775527d73fbd45d2fce12cfba",
           "untested": true,
           "options": {"default": "autonomous"}
         }

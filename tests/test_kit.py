@@ -16,7 +16,7 @@ def load(name, file):
 
 T = load("llm_tune", "llm-tune.py")
 L = T.L            # llm-tune's own copy of the launcher: patch this one so both see it
-V12_SHA = "22f9cf1d4f6f291ff93548e7c8412db2f9934ae94cfbde3623a8bf897650a4ef"   # the v1.2 prompt text the tests ran
+V12_SHA = "3583abaede2d9155461515d5f826c4bb66912433fc1ff173edd72c81abb35885"   # the v1.2 prompt text the tests ran
 MIB = 2**20
 
 
@@ -722,7 +722,7 @@ class TestLauncherMode(unittest.TestCase):
         text = "\n".join(printed)
         for line in ("How should the agent work?", "(a) as autonomously as possible: good for long or overnight sessions",
                      "lists its assumptions and any blocking questions at the end", "(p) plan first: it asks its questions up front, then works on its own (untested)",
-                     "(i) interactive: it asks questions as they come up (untested)"):
+                     "(i) interactive: it asks its questions up front and as they come up (untested)"):
             self.assertIn(line, text)
         self.assertEqual([d for _, d in asked], ["a", "a", "p", "p", "i", "p", "p"])        # the last answer is the next default
         self.assertEqual(saved[-1]["mode"], "autonomous")
