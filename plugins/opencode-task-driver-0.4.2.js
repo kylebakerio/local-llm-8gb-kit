@@ -1,4 +1,4 @@
-// opencode-task-driver 0.4.1 -- built from src/core.js + src/plugin.js (source sha256 8754d3cefabe08a3). Do not edit; run `npm run build`.
+// opencode-task-driver 0.4.2 -- built from src/core.js + src/plugin.js (source sha256 09e0d16e684bfda5). Do not edit; run `npm run build`.
 // opencode-task-driver: the opencode adapter. Wires src/core.js into opencode's plugin hooks.
 // See README.md for the design. Tested against opencode 1.18.34.
 //
@@ -18,7 +18,15 @@
 //                                          appended to opencode's system prompt: one system message, not two)
 //   experimental.session.compacting        the task list goes into the summarizer's prompt (focus v4: and the checklist
 //                                          ask for the current task)
+//   tool.definition                        focus v4.2 (leanTools): short task-tool descriptions until the model starts a
+//                                          task list (opencode 1.18.34 calls it on every step, for every tool, with only
+//                                          the tool's id: the session is the one main session this process has seen)
+//   tool.execute.after                     focus: the file map; v4.2: the end of a plan-first window (a file change)
 //   dispose                                last state write
+//
+// v4.2 reads the session's interaction mode from globalThis[Symbol.for("opencode.interaction-mode")] (a Map: session id
+// -> "interactive" | "plan-first" | "autonomous"; no Map, no entry or another value: autonomous). The plugin that
+// publishes it owns plan-first's window ("plan-first" while open, "autonomous" after); this one only records it.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -30,7 +38,7 @@ const core = (() => {
 // Every string in this file that starts with a capital letter and ends up in a tool result, the system prompt or a
 // follow-up prompt is visible to the model. Keep it plain workflow language.
 
-const VERSION = "0.4.1";
+const VERSION = "0.4.2";
 
 const DEFAULTS = Object.freeze({
   maxNudgesPerTask: 2,   // follow-up prompts for one task before it is set aside as unfinished
@@ -83,18 +91,22 @@ function newState(session, mode = "focus", features = undefined) {
     compacted_at: null,   // time of the last compaction (to tell whether opencode's previous summary predates the boundary)
   });
   setFeatures(s, features);
+  if (featureOn(s, "start_gate")) s.started = null;   // v4.2: null | {at, via}: when the model started a task list (start_task_list, or filing without it)
   return s;
 }
 
 // focus mode: set (or clear) the 0.3.1 features and the 0.4.0 (v4) ones on a state, as the plugin's options say. The v4
 // keys are kept only when one of them is on, so with all four off the state (and everything shown) is 0.3.2's. 0.4.1's
-// planner_notes is kept only when on, so with it off the state is 0.4.0's.
+// planner_notes is kept only when on, so with it off the state is 0.4.0's; the same for each of 0.4.2's (V42_KEYS), so
+// with them off the state is 0.4.1's.
+const V42_KEYS = ["done_notes", "notes_any_task", "start_gate", "lean_tools", "interactive_answers", "typed_first_message"];
 function setFeatures(state, features) {
   const on = (k) => !!(features && features[k]);
   const f = { file_map: on("file_map"), test_rule: on("test_rule"), requirements_check: on("requirements_check") };
   const v4 = { implicit_tasks: on("implicit_tasks"), compaction_anchor: on("compaction_anchor"), step_lists: on("step_lists"), request_words: on("request_words") };
-  if (Object.values(v4).some(Boolean) || on("planner_notes")) Object.assign(f, v4);
+  if (Object.values(v4).some(Boolean) || on("planner_notes") || V42_KEYS.some(on)) Object.assign(f, v4);
   if (on("planner_notes")) f.planner_notes = true;
+  for (const k of V42_KEYS) if (on(k)) f[k] = true;
   if (state.mode === "focus" && Object.values(f).some(Boolean)) state.features = f;
   else delete state.features;
   return state;
@@ -114,6 +126,19 @@ const hasFiled = (state) => state.tasks.some((t) => !t.implicit);
 // v4.1 (0.4.1): planner_notes -- a filed task may carry the model's notes from a first look at the code (file_tasks'
 // optional `notes`), kept apart from its text and shown, labelled as not verified, in that task's context only
 const plannerNotesOn = (state) => featureOn(state, "planner_notes");
+// v4.2 (0.4.2): done_notes -- a task_note result ends with the task's status (open: finish_task's handoff is where the
+// completion summary goes) and notes are shown as progress notes under the task's status; notes_any_task -- a note can go
+// on any task (a later one too: it shows when that task starts); start_gate -- before a task list, one short line (call
+// start_task_list for more than one separate problem), the planning instructions only once it is called; no step-list line
+// or todo-list rebuild for a single problem; lean_tools -- the adapter's short tool descriptions until the list is started;
+// interactive_answers -- the session's interaction mode (the adapter reads it from a shared key) decides what a typed
+// message and an idle do; typed_first_message -- the adapter's first-message capture leaves out synthetic text
+const doneNotesOn = (state) => featureOn(state, "done_notes");
+const notesAnyOn = (state) => featureOn(state, "notes_any_task");
+const startGateOn = (state) => featureOn(state, "start_gate");
+const interactiveOn = (state) => featureOn(state, "interactive_answers");
+// v4.2: the model has started a task list (start_task_list, file_tasks or add_task), or filed one
+function listStarted(state) { return !!(state && (state.started || hasFiled(state))); }
 
 const STATUS_LABEL = { open: "open", done: "done", given_up: "given up", unfinished: "set aside: unfinished" };
 
@@ -212,11 +237,18 @@ const PLANNER_NOTES_HEAD = "Notes from a first look at the code (not verified; c
 
 // "<head> <id> of <N>: <title>" + the task's full text (details, notes); firstLook (v4.1, the task context only): the
 // notes filed with the task, labelled, right after its text
+// v4.2 (done_notes): notes are the model's progress notes, shown under the task's status, which is what counts
+const NOTES_LABEL = "Progress notes (written while working; the status above is what counts):";
+const NOTE_OPEN = "This task is still open. When it is finished, call finish_task; its handoff is where the completion summary goes.";
+const NOTES_NONE = "Progress notes: none yet.";
+const statusLine = (t) => `Status: ${STATUS_LABEL[t.status] || t.status}.`;
+
 function taskText(state, t, head = "Task", { notes = true, firstLook = false } = {}) {
   const lines = [`${head} ${t.id} of ${state.tasks.length}: ${t.title}`, "", t.details];
   if (firstLook && t.planner_notes) lines.push("", PLANNER_NOTES_HEAD, t.planner_notes);
   if (notes && t.notes.length) {
-    lines.push("", "Notes recorded for this task:");
+    if (doneNotesOn(state)) lines.push("", statusLine(t), NOTES_LABEL);
+    else lines.push("", "Notes recorded for this task:");
     for (const n of t.notes) lines.push(`- ${n.text}`);
   }
   return lines.join("\n");
@@ -238,6 +270,10 @@ const CONTINUE_FOCUS = "Continue working on this task. When it is done, call fin
 const TEST_RULE = "While working on a task, run only the tests for that task; the full test suite (and any build or lint step) runs once, at the end, after the last task.";
 const TOOLS_HELP_FOCUS = "Use task_note to record findings and progress for the current task (notes are kept with the task list), add_task if you find another separate problem, and list_tasks to see the whole list.";
 const workRules = (state) => (focuses(state) ? WORK_RULES_FOCUS : WORK_RULES);
+// v4.2: notes_any_task -- a note may go on a later task; done_notes -- a note does not finish a task
+const TOOLS_HELP_ANY = "Use task_note to record findings and progress for a task, including something a later task will need (notes are kept with the task list), add_task if you find another separate problem, and list_tasks to see the whole list.";
+const NOTE_NOT_DONE = "A note does not finish a task: the completion summary goes in finish_task's handoff.";
+const toolsHelpFocus = (state) => (notesAnyOn(state) ? TOOLS_HELP_ANY : TOOLS_HELP_FOCUS) + (doneNotesOn(state) ? ` ${NOTE_NOT_DONE}` : "");
 
 const PLANNING_BLOCK = [
   "<task_planning>",
@@ -273,6 +309,20 @@ function planningBlock(state) {
   return stepsOn(state) ? PLANNING_BLOCK_V4 : PLANNING_BLOCK_FOCUS;
 }
 
+// v4.2 (start_gate): before a task list the block is this one line; start_task_list's result carries the planning
+// instructions (0.4.1's lines, verbatim, plus planner notes' sentence), and the planning block shows them until file_tasks
+const PRE_LIST_BLOCK = [
+  "<task_planning>",
+  "If the user's request contains more than one separate problem (for example several bugs, or several changes that can each be made on their own), call start_task_list before you start working. Otherwise just do the work.",
+  "</task_planning>",
+].join("\n");
+const FOCUS_LINES = PLANNING_BLOCK_FOCUS.split("\n");   // [2] losslessly, [3] order and dependencies, [4] fresh conversations
+const START_NOTES = "A task can also carry notes on what you saw in the code for it: the files, functions and constraints that matter. Only what you saw in the code.";
+function startLines(state) {
+  return ["Call file_tasks now, with one task per separate problem in the request.", FOCUS_LINES[2], ...(plannerNotesOn(state) ? [START_NOTES] : []), FOCUS_LINES[3], FOCUS_LINES[4]];
+}
+const startedBlock = (state) => ["<task_planning>", ...startLines(state), "</task_planning>"].join("\n");
+
 // The key decides when the task block may change: a new current task, a task added, a status change, or a
 // compaction. Notes added within a task do NOT change it (they are echoed in the task_note result instead), so the
 // system prompt stays byte-identical across the steps of one task and a model server's prompt cache keeps its prefix.
@@ -303,6 +353,7 @@ function renderTaskBlock(state) {
 // re-rendered only when viewKey changes. enforce mode: nothing. Mutates state.view (the caller saves it).
 function systemBlock(state) {
   if (!drivesTasks(state.mode)) return null;
+  if (startGateOn(state) && !hasFiled(state)) return listStarted(state) ? startedBlock(state) : PRE_LIST_BLOCK;   // v4.2
   if (!state.tasks.length) return focuses(state) ? planningBlock(state) : PLANNING_BLOCK;
   if (implicitOn(state) && !hasFiled(state)) return planningBlock(state);   // v4: the request is the (implicit) task: no list to show
   const key = viewKey(state);
@@ -404,6 +455,8 @@ function fileTasks(state, rawTasks, at = {}) {
     if (at.git !== undefined && state.git == null) state.git = at.git;
     if (at.files !== undefined) state.files = at.files;
   }
+  let startedNow = false;
+  if (startGateOn(state) && !state.started) { state.started = { at: Date.now(), via: "file_tasks" }; startedNow = true; }   // v4.2: filed without start_task_list
   const cur = currentTask(state);
   const out = [
     `Filed ${made.length} task${made.length === 1 ? "" : "s"}:`,
@@ -413,7 +466,7 @@ function fileTasks(state, rawTasks, at = {}) {
     "",
     `Work on the tasks one at a time. ${workRules(state)}`,
   ];
-  return { output: out.join("\n"), event: { event: "filed", n: made.length, titles: made.map((t) => t.title) } };
+  return { output: out.join("\n"), event: { event: "filed", n: made.length, titles: made.map((t) => t.title), ...(startedNow ? { started: "file_tasks" } : {}) } };
 }
 
 function addTask(state, raw, at = {}) {
@@ -429,9 +482,11 @@ function addTask(state, raw, at = {}) {
   }
   const t = newTask(state, state.tasks.length + 1, r.task);
   state.tasks.push(t);
+  let startedNow = false;
+  if (startGateOn(state) && !state.started) { state.started = { at: Date.now(), via: "add_task" }; startedNow = true; }   // v4.2
   const cur = currentTask(state);
   const tail = cur && cur.id !== t.id ? ` The current task is still task ${cur.id} (${cur.title}).` : (cur ? ` It is now the current task.` : "");
-  return { output: `Added task ${t.id} of ${state.tasks.length}: ${t.title}.${tail}`, event: { event: "added", id: t.id, title: t.title } };
+  return { output: `Added task ${t.id} of ${state.tasks.length}: ${t.title}.${tail}`, event: { event: "added", id: t.id, title: t.title, ...(startedNow ? { started: "add_task" } : {}) } };
 }
 
 function taskNote(state, id, text) {
@@ -442,10 +497,25 @@ function taskNote(state, id, text) {
   if (!s) return err("the note is empty");
   if (t.notes.length >= LIMITS.notesPerTask) t.notes.shift();
   t.notes.push({ text: s });
+  if (doneNotesOn(state)) {   // v4.2: the result ends with the task's status, so a note never reads as closing it
+    const tail = t.status === "open" ? NOTE_OPEN : `This task is closed (${STATUS_LABEL[t.status] || t.status}).`;
+    return {
+      output: [`Noted for task ${t.id} (${t.title}). Progress notes for this task so far:`, ...t.notes.map((n) => `- ${n.text}`), "", tail].join("\n"),
+      event: { event: "noted", id: t.id, chars: s.length, status: t.status },
+    };
+  }
   return {
     output: [`Noted for task ${t.id} (${t.title}). Notes for this task so far:`, ...t.notes.map((n) => `- ${n.text}`)].join("\n"),
     event: { event: "noted", id: t.id, chars: s.length },
   };
+}
+
+// v4.2 (start_gate): the model says the request holds more than one separate problem. -> the planning instructions
+function startTaskList(state, at = Date.now()) {
+  if (hasFiled(state)) return { output: `${state.tasks.length} tasks are already filed; use add_task to add another one, or list_tasks to see them.`, event: { event: "start-again", filed: true } };
+  const again = listStarted(state);
+  if (!again) state.started = { at, via: "start_task_list" };
+  return { output: [again ? "The task list is already started." : "Task list started.", ...startLines(state)].join("\n"), event: { event: again ? "start-again" : "started", via: "start_task_list" } };
 }
 
 // `note`: an optional short summary of what changed. focus mode: no summary; `handoff`, what the remaining tasks need
@@ -505,8 +575,9 @@ function decideTasks(state, opts = DEFAULTS) {
   let cur = currentTask(state);
   if (cur && cur.nudges < opts.maxNudgesPerTask) {
     cur.nudges += 1; state.prompts += 1;
+    const noted = cur.notes.map((n) => `- ${n.text}`).join("\n");
     const text = `Task ${cur.id} of ${state.tasks.length} (${cur.title}) is still open.\n\n${cur.details}` +
-      (cur.notes.length ? `\n\nNotes recorded for this task:\n${cur.notes.map((n) => `- ${n.text}`).join("\n")}` : "") +
+      (cur.notes.length ? (doneNotesOn(state) ? `\n\n${statusLine(cur)}\n${NOTES_LABEL}\n${noted}` : `\n\nNotes recorded for this task:\n${noted}`) : "") +
       `\n\n${focuses(state) ? CONTINUE_FOCUS : CONTINUE}`;
     return { kind: "nudge", task: cur.id, n: cur.nudges, text };
   }
@@ -631,7 +702,7 @@ function closedTaskLines(state, t, cur) {
   if (t.reason) out.push(`   Reason: ${indent(t.reason)}`);
   if (t.handoff) out.push(`   Handoff: ${indent(t.handoff)}`);
   else if (t.status === "unfinished" && t.notes.length) {   // set aside without a handoff: its notes stand in for one
-    out.push("   Notes:");
+    out.push(doneNotesOn(state) ? `   ${NOTES_LABEL}` : "   Notes:");
     for (const n of t.notes) out.push(`   - ${indent(n.text)}`);
   }
   return out;
@@ -662,11 +733,11 @@ function renderFocusBlock(state) {
   if (map.length) out.push("", ...map);
   if (cur && cur.implicit) {                   // v4: a request that arrived after the list: its own words, no task rules
     out.push("", taskText(state, cur, "The current task is task"));
-    if (stepsOn(state)) out.push("", STEPS_REQUEST);
+    if (stepsOn(state) && !startGateOn(state)) out.push("", STEPS_REQUEST);   // v4.2: a single problem gets no step-list line
   } else if (cur) {
     out.push("", taskText(state, cur, "The current task is task", { firstLook: plannerNotesOn(state) }));
-    if (!cur.notes.length) out.push("", "Notes recorded for this task: none yet.");
-    out.push("", WORK_RULES_FOCUS, ...(testRuleOn(state) ? [TEST_RULE] : []), TOOLS_HELP_FOCUS, ...(stepsOn(state) ? [STEPS_TASK] : []));
+    if (!cur.notes.length) out.push("", doneNotesOn(state) ? `${statusLine(cur)}\n${NOTES_NONE}` : "Notes recorded for this task: none yet.");
+    out.push("", WORK_RULES_FOCUS, ...(testRuleOn(state) ? [TEST_RULE] : []), toolsHelpFocus(state), ...(stepsOn(state) ? [STEPS_TASK] : []));
   }
   out.push("</task_context>");
   return out.join("\n");
@@ -683,7 +754,10 @@ function focusCompactionContext(state) {
     if (t.status === "given_up" && t.reason) s += ` (reason: ${clip(t.reason, 300)})`;
     if (t.handoff) s += ` (handoff: ${clip(t.handoff, 300)})`;
     lines.push(s);
-    if (cur && t.id === cur.id) for (const n of t.notes) lines.push(`   - note: ${clip(n.text, 500)}`);
+    if (cur && t.id === cur.id && doneNotesOn(state) && t.notes.length) {   // v4.2: progress notes under the status
+      lines.push(`   ${statusLine(t)}`, `   ${NOTES_LABEL}`);
+      for (const n of t.notes) lines.push(`   - ${clip(n.text, 500)}`);
+    } else if (cur && t.id === cur.id) for (const n of t.notes) lines.push(`   - note: ${clip(n.text, 500)}`);
   }
   return lines.join("\n");
 }
@@ -991,24 +1065,92 @@ function implicitTitle(text) {
 // a new task -- the user's words verbatim, appended to the list; an implicit current task closes ("next-request") -- unless
 // it continues the current one: one of `continueTexts` (an outside driver's continue turns), opencode's own continue
 // text, or a message that repeats the current task's text (a re-sent request). -> {event, ...} or null (v4 off, empty).
-function seeRequest(state, raw, { continueTexts = [] } = {}) {
+// v4.2 (interactive_answers): `interaction` is the session's interaction mode ("interactive" | "plan-first" | anything else
+// = autonomous). Interactive (and plan-first during its planning phase): a message before any filed list is added to the
+// request (the implicit task: it stays task 1, reopened if the model had closed it), and interactive only: a message while
+// a filed task is current is a progress note on it. Autonomous: 0.4.1's handling exactly.
+function seeRequest(state, raw, { continueTexts = [], interaction } = {}) {
   if (!implicitOn(state)) return null;
   const text = clipRequest(raw);
   if (!text) return null;
   const cur = currentTask(state);
   const n = normWs(unwrapRunQuoting(raw));    // the whole message (a re-sent request can be longer than the part kept)
+  const im = interactiveOn(state) ? interaction : undefined;
+  notePlanFirst(state, im);
   if (state.tasks.length) {
     const conts = [STOP_ASK, ...(Array.isArray(continueTexts) ? continueTexts : [])].map((c) => normWs(unwrapRunQuoting(c))).filter(Boolean);
     if (conts.includes(n)) return { event: "continued", task: cur ? cur.id : null, why: "continue text" };
-    const own = (cur ? [cur.details, ...(cur.implicit ? [] : [state.request])] : [state.request])
+    const own = (cur ? [cur.details, ...(cur.original != null ? [cur.original] : []), ...(cur.implicit ? [] : [state.request])] : [state.request])
       .map((o) => normWs(String(o || "").endsWith(REQUEST_CUT) ? String(o).slice(0, -REQUEST_CUT.length) : o)).filter(Boolean);   // a clipped request: the part kept
     if (own.some((o) => o === n || (o.length >= REPEAT_MIN && n.includes(o)))) return { event: "continued", task: cur ? cur.id : null, why: "repeats the current task" };
+    const how = handling(state, im, { closing: true });
+    if (how !== "autonomous") {
+      const last = state.tasks[state.tasks.length - 1];
+      const target = !hasFiled(state) ? (last.implicit ? last : null) : cur && cur.implicit ? cur : null;
+      if (target) {                                    // (a) the answer joins the request
+        const e = { event: "answer-added", task: target.id, chars: text.length };
+        if (target.original == null) target.original = target.details;
+        const joined = `${target.details}\n\n${ADDED_HEAD}\n${text}`;
+        target.details = joined.length > LIMITS.request * 2 ? joined.slice(0, LIMITS.request * 2) + REQUEST_CUT : joined;
+        if (target.status !== "open") { target.status = "open"; target.closed_by = null; e.reopened = true; }
+        if (how === "plan" && endPlanPhase(state, "answer")) e.plan_phase_ended = "answer";
+        return e;
+      }
+      if (how === "interactive" && cur) {              // (b) a message mid-task: a progress note on the current task
+        if (cur.notes.length >= LIMITS.notesPerTask) cur.notes.shift();
+        cur.notes.push({ text: clip(`${FROM_USER} ${text}`, LIMITS.details), by: "user" });
+        return { event: "user-note", task: cur.id, chars: text.length };
+      }
+    }
   }
   if (state.tasks.length >= LIMITS.tasks) return { event: "task-cap", task: cur ? cur.id : null };
   if (cur && cur.implicit) { cur.status = "done"; cur.closed_by = "next-request"; }
   const t = newTask(state, state.tasks.length + 1, { title: implicitTitle(text) || "Request", details: text }, true);
   state.tasks.push(t);
   return { event: "implicit-task", id: t.id, chars: text.length };
+}
+
+// v4.2 (interactive_answers): the interaction modes. The mode's owner (another plugin) publishes "plan-first" while the
+// session's planning window is open and "autonomous" once it closes; while it reads "plan-first" the session is handled as
+// in planning: a typed message joins the request, an idle gets no follow-up. The window this plugin saw open is recorded
+// (plan_phase) with how it ended: "answer" (a typed message joined the request), "filed" (file_tasks / add_task),
+// "changed" (a file change), "window-closed" (the owner switched the mode first). The owner may switch the mode on the
+// very message that answers its question before this plugin sees that message, so a message that arrives while the
+// recorded window is still open joins the request too (`closing`).
+const PLAN_FIRST = "plan-first";
+const ADDED_HEAD = "Added later:";
+const FROM_USER = "From the user:";
+function handling(state, interaction, { closing = false } = {}) {   // "interactive" | "plan" | "autonomous"
+  if (!interactiveOn(state)) return "autonomous";
+  if (interaction === "interactive") return "interactive";
+  if (interaction === PLAN_FIRST) return "plan";
+  return closing && planPhase(state) === "planning" ? "plan" : "autonomous";
+}
+// "planning" | "ended" for a session seen in plan-first mode, else null
+function planPhase(state) {
+  if (!interactiveOn(state) || !state.plan_phase) return null;
+  return state.plan_phase.ended ? "ended" : "planning";
+}
+// a session seen in plan-first mode: its window is recorded as open (once)
+function notePlanFirst(state, interaction) {
+  if (!interactiveOn(state) || interaction !== PLAN_FIRST || state.plan_phase) return false;
+  state.plan_phase = { ended: null };
+  return true;
+}
+// records the end of the window this plugin saw open -> {why, at}, or null (none open)
+function endPlanPhase(state, why, at = Date.now()) {
+  if (planPhase(state) !== "planning") return null;
+  state.plan_phase = { ended: { why, at } };
+  return state.plan_phase.ended;
+}
+// the mode no longer reads "plan-first" but the recorded window is open: its owner closed it -> {why, at} or null
+function syncPlanPhase(state, interaction, at = Date.now()) {
+  if (interaction === PLAN_FIRST || planPhase(state) !== "planning") return null;
+  return endPlanPhase(state, "window-closed", at);
+}
+// whether an idle gets no follow-up at all: interactive, or plan-first (the user is there to answer)
+function quietIdle(state, interaction) {
+  return handling(state, interaction) !== "autonomous";
 }
 
 // todo.updated: the session's todo list belongs to the task that is current when the model writes it. A task starts with
@@ -1105,10 +1247,13 @@ function anchorView(state, msgs) {
       added.todos = a.todos.length;
     }
     added.checklist = checklist;
-    extra.push({ id: `${s.info.id}-todoask`, sessionID: sid, messageID: s.info.id, type: "text", synthetic: true,
-      text: `\n\nNext: use the todowrite tool to make the todo list ${checklist ? "match the task checklist above, one item per line" : k.cover}, each with its current status ` +
-            `(completed, in_progress or pending). Then continue with the items that are not completed, keep the todo list up to date as you go, and check it before you finish.` });
-    added.todo_ask = true;
+    // v4.2 (start_gate): a single problem whose model keeps no todo list is not asked to build one after a summary
+    if (!(startGateOn(state) && cur.implicit && !(a.todos && a.todos.length))) {
+      extra.push({ id: `${s.info.id}-todoask`, sessionID: sid, messageID: s.info.id, type: "text", synthetic: true,
+        text: `\n\nNext: use the todowrite tool to make the todo list ${checklist ? "match the task checklist above, one item per line" : k.cover}, each with its current status ` +
+              `(completed, in_progress or pending). Then continue with the items that are not completed, keep the todo list up to date as you go, and check it before you finish.` });
+      added.todo_ask = true;
+    }
     const ps = [...s.parts];
     let at = ps.length;
     for (let j = ps.length - 1; j >= 0; j--) if (ps[j] && ps[j].type === "text") { at = j + 1; break; }
@@ -1130,7 +1275,7 @@ function anchorView(state, msgs) {
   }
   return changed ? { msgs: out, added, summary } : null;
 }
-return { VERSION, DEFAULTS, LIMITS, newState, setFeatures, drivesTasks, focuses, currentTask, openCount, normalizeTask, normalizePlannerNotes, normalizeTasks, PLANNER_NOTES_HEAD, PLANNING_BLOCK, STEPS_REQUEST, STEPS_TASK, PLANNING_BLOCK_FOCUS, PLANNING_BLOCK_V4, viewKey, renderTaskBlock, systemBlock, compactionContext, fileTasks, addTask, taskNote, finishTask, giveUpTask, listTasks, decideTasks, todoKey, decideEnforce, decide, seeUserMessage, summary, renderFocusBlock, summarizerPrompt, priorSummaryBeforeBoundary, markBoundary, noteSummarizerView, viewMessages, noteFile, bashReadCandidates, STOP_ASK, CONTINUE_TASK, seeRequest, noteTodos, anchorAsk, noteCompacting, anchorView };
+return { VERSION, DEFAULTS, LIMITS, newState, setFeatures, listStarted, drivesTasks, focuses, currentTask, openCount, normalizeTask, normalizePlannerNotes, normalizeTasks, PLANNER_NOTES_HEAD, NOTES_LABEL, NOTE_OPEN, PLANNING_BLOCK, STEPS_REQUEST, STEPS_TASK, PLANNING_BLOCK_FOCUS, PLANNING_BLOCK_V4, PRE_LIST_BLOCK, viewKey, renderTaskBlock, systemBlock, compactionContext, fileTasks, addTask, taskNote, startTaskList, finishTask, giveUpTask, listTasks, decideTasks, todoKey, decideEnforce, decide, seeUserMessage, summary, renderFocusBlock, summarizerPrompt, priorSummaryBeforeBoundary, markBoundary, noteSummarizerView, viewMessages, noteFile, bashReadCandidates, STOP_ASK, CONTINUE_TASK, seeRequest, planPhase, notePlanFirst, endPlanPhase, syncPlanPhase, quietIdle, noteTodos, anchorAsk, noteCompacting, anchorView };
 })();
 
 const TITLE_PROMPT = "You are a title generator";   // opencode's title agent; its requests get nothing from us
@@ -1178,10 +1323,25 @@ function gitFiles(snap) {
     return gitEntries(snap.top, snap.base).filter((e) => !was.has(e.s + "\0" + e.p));
   } catch { return null; }
 }
-// the text of a user message as the model saw it (text parts, attached file contents included)
-function userText(parts) {
-  return (parts || []).filter((x) => x && x.type === "text" && !x.ignored && x.text).map((x) => x.text).join("\n").trim();
+// the text of a user message as the model saw it (text parts, attached file contents included); typed (v4.2,
+// typedFirstMessage): only the parts the user typed (opencode's synthetic parts -- attached file contents, its own
+// continue turn, a mode-switch note -- left out)
+function userText(parts, typed = false) {
+  return (parts || []).filter((x) => x && x.type === "text" && !x.ignored && x.text && !(typed && x.synthetic)).map((x) => x.text).join("\n").trim();
 }
+
+// v4.2: the interaction mode another plugin publishes per session (read at each decision, never cached)
+const MODE_KEY = Symbol.for("opencode.interaction-mode");
+const MODES = new Set(["interactive", "plan-first", "autonomous"]);
+function interactionMode(sid) {
+  try {
+    const m = globalThis[MODE_KEY];
+    const v = m && typeof m.get === "function" ? m.get(sid) : undefined;
+    return MODES.has(v) ? v : "autonomous";
+  } catch { return "autonomous"; }
+}
+// tools that change files (bash is checked through git)
+const FILE_TOOLS = new Set(["edit", "write", "multiedit", "patch", "apply_patch"]);
 
 // "prompt": the plugin sends follow-ups itself (TUI, `opencode serve`, `opencode run --attach` servers).
 // "file":   it only records them in the state file (`pending`) for an outside driver to send, e.g. with
@@ -1232,27 +1392,56 @@ export const TaskDriver = async (input, options = {}) => {
   // requestWords (the filing texts ask for the request's own words). continueTexts: messages an outside driver sends to
   // continue the current task (never a new task). v4.1 (0.4.1), on by default; off = 0.4.0 exactly (test/v41-compat.test.js):
   // plannerNotes (file_tasks' items take an optional `notes`, what the model saw in the code, shown labelled as not
-  // verified in that task's context only).
+  // verified in that task's context only). v4.2 (0.4.2), each on by default; all six off = 0.4.1 exactly
+  // (test/v42-compat.test.js): doneNotes (a note's result ends with the task's status; notes shown as progress notes under
+  // it), notesAnyTask (a note can go on a later task), startGate (one short line before any list; start_task_list returns
+  // the planning instructions), leanTools (short tool descriptions until the list is started), interactiveAnswers (the
+  // interaction mode from the shared key; inert without it), typedFirstMessage (the first-message capture is typed text only).
   const features = mode === "focus" ? { file_map: options.fileMap !== false, test_rule: options.testRule !== false,
                                         requirements_check: options.requirementsCheck !== false,
                                         implicit_tasks: options.implicitTasks !== false, compaction_anchor: options.compactionAnchor !== false,
                                         step_lists: options.stepLists !== false, request_words: options.requestWords !== false,
-                                        planner_notes: options.plannerNotes !== false } : null;
+                                        planner_notes: options.plannerNotes !== false,
+                                        done_notes: options.doneNotes !== false, notes_any_task: options.notesAnyTask !== false,
+                                        start_gate: options.startGate !== false, lean_tools: options.leanTools !== false,
+                                        interactive_answers: options.interactiveAnswers !== false, typed_first_message: options.typedFirstMessage !== false } : null;
   const featureList = features ? [...(features.file_map ? ["file-map"] : []), ...(features.test_rule ? ["test-rule"] : []),
                                   ...(features.requirements_check ? ["requirements-check"] : []),
                                   ...(features.implicit_tasks ? ["implicit-tasks"] : []), ...(features.compaction_anchor ? ["compaction-anchor"] : []),
                                   ...(features.step_lists ? ["step-lists"] : []), ...(features.request_words ? ["request-words"] : []),
-                                  ...(features.planner_notes ? ["planner-notes"] : [])] : [];
+                                  ...(features.planner_notes ? ["planner-notes"] : []),
+                                  ...(features.done_notes ? ["done-notes"] : []), ...(features.notes_any_task ? ["notes-any-task"] : []),
+                                  ...(features.start_gate ? ["start-gate"] : []), ...(features.lean_tools ? ["lean-tools"] : []),
+                                  ...(features.interactive_answers ? ["interactive-answers"] : []), ...(features.typed_first_message ? ["typed-first-message"] : [])] : [];
   const continueTexts = Array.isArray(options.continueTexts) ? options.continueTexts.filter((x) => typeof x === "string" && x.trim()) : [];
   log({ event: "loaded", mode, delivery, version: core.VERSION, ...opts, ...(featureList.length ? { features: featureList } : {}),
         ...(continueTexts.length ? { continue_texts: continueTexts.length } : {}) });
   const focus = mode === "focus";
   const implicit = focus && features.implicit_tasks;
+  const typed = focus && features.typed_first_message;                 // v4.2
+  const askMode = focus && features.interactive_answers;               // v4.2: read the interaction mode
+  const modeOf = (sid) => (askMode ? interactionMode(sid) : "autonomous");
   const directory = (input && (input.directory || input.worktree)) || process.cwd();
   const gitStart = focus ? gitSnapshot(directory) : null;   // the workspace before this process's model did anything
 
   // ---- per-session records ----
   const recs = new Map();          // session id -> {state, busy, child, lastErr, cycleErr, agent, model}
+  const mains = new Set();         // v4.2 (leanTools): the main (not sub-agent) sessions this process has seen
+  const seeMain = (sid) => { if (sid && !rec(sid).child) mains.add(sid); };
+  // v4.2: a plan-first window: recorded when seen open, its end recorded (state plan_phase, event plan-phase-ended)
+  const notePhase = (sid, s) => {      // at idle / a tool / a step: open when the mode reads plan-first, closed when no longer
+    if (!askMode || !s) return false;
+    const opened = core.notePlanFirst(s, modeOf(sid));
+    const closed = core.syncPlanPhase(s, modeOf(sid));
+    if (closed) log({ event: "plan-phase-ended", session: sid, why: closed.why });
+    return opened || !!closed;
+  };
+  const endPhase = (sid, s, why) => {
+    if (!askMode || !s) return false;
+    const e = core.endPlanPhase(s, why);
+    if (e) log({ event: "plan-phase-ended", session: sid, why });
+    return !!e;
+  };
   const mainStep = new Set();      // sessions whose next system prompt belongs to a main-agent request
   const compactingNow = new Set(); // sessions in the middle of a compaction
   const rec = (sid) => {
@@ -1318,6 +1507,12 @@ export const TaskDriver = async (input, options = {}) => {
     const s = peek(sid);
     if (!s) return;                       // nothing filed (tasks) / no todo list seen (enforce): inert
     if (s.pending) { log({ event: "pending-dropped", session: sid, kind: s.pending.kind }); s.pending = null; }
+    if (notePhase(sid, s)) save(sid);
+    if (askMode && core.quietIdle(s, modeOf(sid))) {   // v4.2: the user is there to answer: nothing decided, nothing sent
+      save(sid);
+      log({ event: "idle-interactive", session: sid, mode: modeOf(sid), via });
+      return;
+    }
     const before = s.stopped;
     const curBefore = focus ? (core.currentTask(s) || { id: 0 }).id : 0;
     const act = core.decide(s, opts);
@@ -1345,7 +1540,7 @@ export const TaskDriver = async (input, options = {}) => {
         case "session.created":
         case "session.updated": {
           const info = p.info;
-          if (info && info.id && info.parentID) rec(info.id).child = true;
+          if (info && info.id && info.parentID) { rec(info.id).child = true; mains.delete(info.id); }
           break;
         }
         case "session.status": {
@@ -1402,8 +1597,9 @@ export const TaskDriver = async (input, options = {}) => {
       if (inp.agent) r.agent = inp.agent;
       if (inp.model) r.model = inp.model;
       r.lastErr = null; r.cycleErr = null;
+      seeMain(sid);
       const s = peek(sid);
-      if (focus && !r.child && r.firstText === undefined && !s) r.firstText = userText(out && out.parts) || null;   // a candidate for the request
+      if (focus && !r.child && r.firstText === undefined && !s) r.firstText = userText(out && out.parts, typed) || null;   // a candidate for the request
       let delivered = false;
       if (s && s.pending) {
         const text = ((out && out.parts) || []).filter((x) => x && x.type === "text" && !x.synthetic).map((x) => x.text).join("\n");
@@ -1426,6 +1622,8 @@ export const TaskDriver = async (input, options = {}) => {
         if (!summarizer) anchorView(sid, msgs);                 // v4: never on the summarizer's own view
       }
       if (summarizer) { compactingNow.delete(sid); return; }   // the summarizer's request
+      seeMain(sid);
+      if (askMode && !rec(sid).child) { const s = peek(sid); if (s && notePhase(sid, s)) save(sid); }   // v4.2: the window, each step
       mainStep.add(sid);
     }),
 
@@ -1491,7 +1689,7 @@ export const TaskDriver = async (input, options = {}) => {
       const r = rec(sid);
       const first = msgs[0];
       if (r.firstText === undefined && first && first.info && first.info.role === "user" && !(first.parts || []).some((x) => x && x.type === "compaction"))
-        r.firstText = userText(first.parts) || null;
+        r.firstText = userText(first.parts, typed) || null;
       if (implicit && kind === "request") {   // v4: a request chat.message never showed (it is task 1 all the same)
         const u = msgs.find((m) => m && m.info && m.info.role === "user" && !(m.parts || []).some((x) => x && x.type === "compaction"));
         if (u) newRequest(sid, u.parts, "view");
@@ -1515,13 +1713,15 @@ export const TaskDriver = async (input, options = {}) => {
   function newRequest(sid, parts, via) {
     const ps = parts || [];
     if (ps.some((x) => x && x.type === "compaction")) return;
-    const typed = ps.filter((x) => x && x.type === "text" && !x.synthetic && !x.ignored && x.text).map((x) => x.text).join("\n").trim();
-    if (!typed) return;
+    const words = ps.filter((x) => x && x.type === "text" && !x.synthetic && !x.ignored && x.text).map((x) => x.text).join("\n").trim();
+    if (!words) return;
     const s = stateFor(sid);
-    const e = core.seeRequest(s, typed, { continueTexts });
-    if (!e) return;
+    const had = askMode && !!s.plan_phase;
+    const e = core.seeRequest(s, words, { continueTexts, ...(askMode ? { interaction: modeOf(sid) } : {}) });
+    if (!e) { if (askMode && !had && s.plan_phase) save(sid); return; }
     save(sid);
     log({ session: sid, ...e, via });
+    if (e.plan_phase_ended) log({ event: "plan-phase-ended", session: sid, why: e.plan_phase_ended });
   }
 
   // v4: the compaction anchor on the model's view (after the clean slate); logged once per summary
@@ -1544,7 +1744,7 @@ export const TaskDriver = async (input, options = {}) => {
         const list = (res && (res.data || res)) || [];
         if (Array.isArray(list)) {
           const first = list.find((m) => m && m.info && m.info.role === "user" && !(m.parts || []).some((x) => x && x.type === "compaction"));
-          const text = first && userText(first.parts);
+          const text = first && userText(first.parts, typed);
           if (text) return text;
         }
       }
@@ -1590,10 +1790,26 @@ export const TaskDriver = async (input, options = {}) => {
     }
     return [];
   }
-  if (focus && features.file_map) {
+  // v4.2: a plan-first session's planning phase ends at its first file change (a file tool, or bash with git showing a
+  // change since the work began)
+  function phaseAfterTool(sid, tool) {
+    if (!askMode) return;
+    const s = peek(sid);
+    if (!s) return;
+    let dirty = notePhase(sid, s);
+    if (core.planPhase(s) === "planning") {
+      let changed = FILE_TOOLS.has(tool);
+      if (!changed && tool === "bash") { const f = gitFiles(s.git || gitStart); changed = Array.isArray(f) && f.length > 0; }
+      if (changed && endPhase(sid, s, "changed")) dirty = true;
+    }
+    if (dirty) save(sid);
+  }
+  if (focus && (features.file_map || askMode)) {
     hooks["tool.execute.after"] = async (inp) => guard("tool.after", () => {
       const sid = inp && inp.sessionID;
       if (!sid || rec(sid).child) return;
+      phaseAfterTool(sid, inp.tool);
+      if (!features.file_map) return;
       const found = filesOfTool(inp.tool, inp.args).map(([k, p]) => [k, relPath(p)]).filter(([, p]) => p);
       if (!found.length) return;
       const s = peek(sid);
@@ -1610,10 +1826,53 @@ export const TaskDriver = async (input, options = {}) => {
   }
   const takePending = (sid) => { const l = pending.get(sid) || []; pending.delete(sid); return l; };
 
-  const focusHooks = focus ? { firstRequest, gitFiles: (s) => gitFiles(s.git || gitStart), gitStart: () => gitStart, features, takePending } : null;
+  const focusHooks = focus ? { firstRequest, gitFiles: (s) => gitFiles(s.git || gitStart), gitStart: () => gitStart, features, takePending,
+                                seeMain, filed: (sid, s) => endPhase(sid, s, "filed") } : null;
   if (core.drivesTasks(mode)) hooks.tool = tools({ stateFor, save, log, opts, focusHooks });
+
+  // v4.2 (leanTools): opencode 1.18.34 calls this for every tool on every step, before the step's other hooks, with only
+  // the tool's id. Until the session has started a task list the task tools get one-line descriptions (the full ones are
+  // what they are registered with). The session: the one main session this process has seen (`opencode run` serves one);
+  // with more than one, which one this step is for is unknown, so the short texts (the task context carries the rules).
+  if (focus && features.lean_tools && hooks.tool) {
+    let ambiguous = false;
+    hooks["tool.definition"] = async (inp, out) => guard("tool.definition", () => {
+      const id = inp && inp.toolID;
+      if (!out || !Object.prototype.hasOwnProperty.call(LEAN, id) || !hooks.tool[id]) return;
+      if (mains.size > 1) {
+        if (!ambiguous) { ambiguous = true; log({ event: "lean-tools-ambiguous", sessions: mains.size }); }
+        out.description = LEAN[id];
+        return;
+      }
+      const sid = mains.size === 1 ? mains.values().next().value : null;
+      const s = sid ? peek(sid) : null;
+      if (s && core.listStarted(s)) return;   // started: the registered (full) description
+      out.description = LEAN[id];
+    });
+  }
   return hooks;
 };
+
+// v4.2 (leanTools): the task tools' descriptions until a task list is started (the parameters are never changed)
+const LEAN = Object.freeze({
+  file_tasks: "File the tasks for a task list started with start_task_list. Returns the first task.",
+  add_task: "Add one more task to the task list.",
+  task_note: "Record a note for a task.",
+  finish_task: "Mark a task done.",
+  give_up_task: "Mark a task as one that cannot be done, with the reason.",
+  list_tasks: "Show the task list.",
+});
+
+// task_note's description. v4.2: doneNotes -- notes are for progress while working, the completion summary goes in
+// finish_task's handoff; notesAnyTask -- a note can go on a later task. Both off: 0.4.1's text.
+function noteDescription(done, any) {
+  const head = done
+    ? "Record a progress note for a task while working: a finding, what you changed, what is left."
+    : "Record a finding or a progress note for a task: what you found, what you changed, what is left.";
+  return [head, "Notes are kept with the task list outside the conversation, so they are still there if the conversation is summarized.",
+    ...(any ? ["A note can go on any task, including a later one: something learned now that a later task will need; it shows when that task starts."] : []),
+    ...(done ? ["A note does not finish a task: when a task is finished, call finish_task, and put the completion summary in its handoff."] : [])].join(" ");
+}
 
 // Tool argument schemas are plain JSON Schema: opencode 1.18 accepts them for plugin tools (every listed top-level
 // property is required and nothing is validated, so core.js validates). No zod import keeps this a single
@@ -1627,6 +1886,7 @@ function tools({ stateFor, save, log, opts, focusHooks }) {
   const run = (ctx, fn) => {
     const sid = ctx && ctx.sessionID;
     if (!sid) return "Error: no session";
+    if (focus) focusHooks.seeMain(sid);
     const s = stateFor(sid);
     const curBefore = focus ? (core.currentTask(s) || { id: 0 }).id : 0;
     const filedBefore = s.tasks.some((t) => !t.implicit);   // filing starts task 1 in the conversation it was filed in: no boundary (v4: nor over the request as task 1)
@@ -1661,7 +1921,16 @@ function tools({ stateFor, save, log, opts, focusHooks }) {
   };
   const NOTES_SENTENCE = notes ? " A task can also carry notes on what you saw in the code for it." : "";
   const fileArgs = (args) => args && args.tasks;
+  // v4.2 (startGate): the one tool shown with its full text before any list; its result is the planning instructions
+  const start = focus && !!focusHooks.features.start_gate ? {
+    start_task_list: {
+      description: "Start a task list for a request that contains more than one separate problem. Call it before you start working; it returns how to file the tasks.",
+      args: {},
+      execute: async (_args, ctx) => run(ctx, (s) => core.startTaskList(s)),
+    },
+  } : {};
   return {
+    ...start,
     file_tasks: {
       description: words
         ? `Split the user's request into separate tasks, one per problem, and keep them in a task list outside the conversation. Call it before starting work when the request contains more than one separate problem. For each task, give a short title and the request's own words about that problem.${NOTES_SENTENCE} List the tasks so that a task comes after any task it depends on. Returns the first task.`
@@ -1687,7 +1956,10 @@ function tools({ stateFor, save, log, opts, focusHooks }) {
           }
           return run(ctx, (s) => {
             const r = core.fileTasks(s, fileArgs(args), at);
-            if (!String(r.output).startsWith("Error")) for (const [k, p] of focusHooks.takePending(sid)) core.noteFile(s, k, p);   // reads before filing: task 1's
+            if (!String(r.output).startsWith("Error")) {
+              for (const [k, p] of focusHooks.takePending(sid)) core.noteFile(s, k, p);   // reads before filing: task 1's
+              focusHooks.filed(sid, s);                                                    // v4.2: a plan-first planning phase ends
+            }
             return r;
           });
         }
@@ -1708,11 +1980,15 @@ function tools({ stateFor, save, log, opts, focusHooks }) {
           const known = stateFor(sid), cur = core.currentTask(known);
           if (cur && cur.implicit && !known.tasks.some((t) => !t.implicit)) { at.git = focusHooks.gitStart(); at.files = focusHooks.gitFiles({ git: at.git }); }
         }
-        return run(ctx, (s) => core.addTask(s, args, at));
+        return run(ctx, (s) => {
+          const r = core.addTask(s, args, at);
+          if (focus && !String(r.output).startsWith("Error")) focusHooks.filed(sid, s);   // v4.2: a plan-first window ends
+          return r;
+        });
       },
     },
     task_note: {
-      description: "Record a finding or a progress note for a task: what you found, what you changed, what is left. Notes are kept with the task list outside the conversation, so they are still there if the conversation is summarized.",
+      description: noteDescription(focus && !!focusHooks.features.done_notes, focus && !!focusHooks.features.notes_any_task),
       args: { id, text: str("The note.") },
       execute: async (args, ctx) => run(ctx, (s) => core.taskNote(s, args && args.id, args && args.text)),
     },

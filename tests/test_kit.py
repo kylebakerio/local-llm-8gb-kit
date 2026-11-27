@@ -220,7 +220,7 @@ class TestCheckKit(unittest.TestCase):
     A = {"file": "plugins/compaction-anchor.js", "options": {"parts": ["checklist", "reinsert"]}}
     SP_CONT = {"file": "plugins/system-prompt.js", "options": {"file": "{kit}/prompts/v1-1.md", "continueText": "Continue with the task."}}
     SP = {"file": "plugins/system-prompt.js", "options": {"file": "{kit}/prompts/v1-1.md"}}
-    TD = {"file": "plugins/opencode-task-driver-0.4.1.js", "options": {"mode": "focus"}}
+    TD = {"file": "plugins/opencode-task-driver-0.4.2.js", "options": {"mode": "focus"}}
 
     def bad(self, *plugins):
         out = []; C.check_setup({"id": "x", "plugins": list(plugins)}, out); return out
@@ -260,7 +260,7 @@ class TestKeeperPlugins(unittest.TestCase):
             {"name": "sp", "file": "plugins/system-prompt.js"}]},
         {"id": "task-driver", "name": "td", "ask": "?", "plugins": [
             {"name": "sp", "file": "plugins/system-prompt.js"},
-            {"name": "driver", "file": "plugins/opencode-task-driver-0.4.1.js"}]}]}
+            {"name": "driver", "file": "plugins/opencode-task-driver-0.4.2.js"}]}]}
 
     def run_with(self, missing, sid):
         have = lambda p, quiet=False: None if p["file"] in missing else "/x/" + p["file"]
@@ -272,12 +272,12 @@ class TestKeeperPlugins(unittest.TestCase):
         self.assertEqual(self.run_with({"plugins/system-prompt.js"}, "standard"), "standard")   # the prompt alone may be missing
 
     def test_a_missing_keeper_switches_to_the_other_setup(self):
-        self.assertEqual(self.run_with({"plugins/opencode-task-driver-0.4.1.js"}, "task-driver"), "standard")
+        self.assertEqual(self.run_with({"plugins/opencode-task-driver-0.4.2.js"}, "task-driver"), "standard")
         self.assertEqual(self.run_with({"plugins/compaction-anchor.js"}, "standard"), "task-driver")
 
     def test_neither_keeper_stops_before_a_session(self):
         with self.assertRaises(SystemExit):
-            self.run_with({"plugins/compaction-anchor.js", "plugins/opencode-task-driver-0.4.1.js"}, "standard")
+            self.run_with({"plugins/compaction-anchor.js", "plugins/opencode-task-driver-0.4.2.js"}, "standard")
 
     def test_a_prompt_with_a_trailing_newline_is_refused(self):
         with tempfile.TemporaryDirectory() as t, mock.patch.object(C, "KIT", t):
@@ -707,6 +707,7 @@ for (const [op, ...a] of spec.ops) {
   else if (op === "after") { await each("tool.execute.after", { tool: a[1], sessionID: a[0], callID: "c", args: {} }, { title: "", output: "", metadata: {} }); out.push(null); }
   else if (op === "key") { const m = globalThis[Symbol.for("opencode.interaction-mode")]; out.push(m ? (m.get(a[0]) ?? null) : null); }
   else if (op === "calls") out.push(calls.slice());
+  else if (op === "read") { try { out.push(JSON.parse(fs.readFileSync(path.join(spec.tmp, a[0]), "utf8"))); } catch { out.push(null); } }
 }
 console.log(JSON.stringify(out));
 """
@@ -852,6 +853,71 @@ class TestModePlugin(unittest.TestCase):
         out = self.run_ops([self.im("autonomous")], [["config", {"command": {"interactive": {"template": "mine"}}}],
                                                     ["command", "interactive", "s1", part()], ["key", "s1"]])
         self.assertEqual((out[0]["command"]["interactive"], out[1]["parts"], out[2]), ({"template": "mine"}, part(), None))
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class TestModeAndDriver(unittest.TestCase):
+    """The task driver 0.4.2 reads the mode the interaction-mode plugin publishes (kit.json's order: the driver, then the
+    mode plugin). Interactive: her typed answer joins the request; autonomous: 0.4.1's handling (a new request)."""
+    def tasks(self, mode):
+        drv = [os.path.join(KIT, "plugins", "opencode-task-driver-0.4.2.js"), {"mode": "focus"}]
+        im = [os.path.join(KIT, "plugins", "interaction-mode.js"), {"default": mode}]
+        ops = [["chat", "s1", [{"type": "text", "text": "Fix the two checkout bugs: totals and the coupon field"}]],
+               ["chat", "s1", [{"type": "text", "text": "Use the store currency for totals"}]], ["read", "s1.json"], ["key", "s1"]]
+        out = TestModePlugin.run_ops(self, [drv, im], ops)
+        return out[2]["tasks"], out[3]
+
+    def test_an_answer_joins_the_request_when_she_is_there(self):
+        tasks, key = self.tasks("interactive")
+        self.assertEqual(key, "interactive")
+        self.assertEqual(len(tasks), 1)
+        self.assertIn("Use the store currency for totals", tasks[0]["details"])
+        self.assertEqual(tasks[0]["status"], "open")
+        tasks, key = self.tasks("autonomous")
+        self.assertEqual(key, "autonomous")
+        self.assertEqual([t["status"] for t in tasks], ["done", "open"])                # 0.4.1: the message is a new request
+
+
+class TestDefaultSetup(unittest.TestCase):
+    """v1.2 + the task driver 0.4.2 is the default setup; v1.2 + the compaction plugin is the lighter one, offered at each
+    start. An answer saved while the other setup was the default no longer counts."""
+    DRIVER_SHA = "34faa56d695c973c9e7d55b53d6b20d42718efa24724a6d41a4edb038efe40d0"
+
+    def kit(self):
+        with open(os.path.join(KIT, "kit.json")) as f: return json.load(f)
+
+    def test_the_driver_setup_is_the_default(self):
+        k = self.kit()
+        d = next(s for s in k["setups"] if s.get("default"))
+        self.assertEqual((d["id"], k["setup"]), ("task-driver", d["name"]))
+        files = [p["file"] for p in d["plugins"]]
+        self.assertEqual(files, ["plugins/system-prompt.js", "plugins/opencode-task-driver-0.4.2.js", "plugins/interaction-mode.js"])
+        sp, drv = d["plugins"][0], d["plugins"][1]
+        self.assertNotIn("continueText", sp["options"])                              # the driver handles the turn after a summary
+        self.assertEqual((drv["sha256"], drv["options"]), (self.DRIVER_SHA, {"mode": "focus"}))
+        light = next(s for s in k["setups"] if not s.get("default"))
+        self.assertIn("much more reliable on complex tasks, but can take much longer", light["ask"])
+        self.assertIn("plugins/compaction-anchor.js", [p["file"] for p in light["plugins"]])
+        self.assertFalse(os.path.exists(os.path.join(KIT, "plugins", "opencode-task-driver-0.4.1.js")))
+        cfg = json.loads(L.session_config({"models": {}}, None, "autonomous"))
+        self.assertTrue(any(f.endswith("/plugins/opencode-task-driver-0.4.2.js") for f, o in cfg["plugin"]))
+
+    def test_an_answer_from_before_the_switch_no_longer_counts(self):
+        class TTY:
+            def isatty(self): return True
+        asked, answers, saved = [], [], []
+        def fake_yes(q, default=True):
+            asked.append(default); v = answers.pop(0); return default if v is None else v
+        st = {"setup": "standard"}                                 # saved under the old default (the driver was off)
+        with mock.patch.object(L.sys, "stdin", TTY()), mock.patch.object(L, "yes", fake_yes), \
+             mock.patch.object(L, "save_state", lambda x: saved.append(dict(x))), mock.patch("builtins.print"):
+            answers[:] = [None]; self.assertEqual(L.choose_setup(st), "task-driver")      # Enter: the new default
+            answers[:] = [True]; self.assertEqual(L.choose_setup(st), "standard")         # she picks the lighter one
+            answers[:] = [None]; self.assertEqual(L.choose_setup(st), "standard")         # remembered now
+        self.assertEqual(asked, [False, False, True])
+        self.assertEqual(saved[-1], {"setup": "standard", "setup_default": "task-driver"})
+        self.assertEqual(L.choose_setup({"setup": "standard"}), "task-driver")               # no terminal: the same rule
+        self.assertEqual(L.choose_setup({"setup": "standard", "setup_default": "task-driver"}), "standard")
 
 
 class TestLauncherMode(unittest.TestCase):

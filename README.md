@@ -32,7 +32,10 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
   - v1.2's own test results are still to come. Its earlier versions are measured: the numbers above are for v1 and v1.1.
   - When opencode summarizes a long session, the model is now told "Continue with the task." Before, it was told to continue or to stop and ask.
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
-- **The task driver is now your choice, and off by default.** At each start the launcher asks: *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* It remembers your answer for the next time. This is a newer version, 0.4.1, than the one the kit had before. See *What the launcher changes*.
+- **The task driver is now on by default: version 0.4.2, with the v1.2 prompt.** When a request holds several separate problems, it has the model list them as tasks and work through them one at a time. It is much more reliable on complex tasks, but can take much longer.
+  - On a single problem it adds only one short line until the model starts a task list, so a single bug costs about the same as without it.
+  - So far its gains were measured on a desktop GPU, on tests that each hold several bugs, with an earlier version (0.3): Qwen3.8-27B fixed 33 of 36 bugs with it against 22 of 36 without, and Qwen3.8 Flash-Next 33 of 36 against 28 of 36. A first test of 0.4.2 itself is running now.
+  - At each start the launcher offers the lighter setup instead: the v1.2 prompt with the compaction plugin, without the driver. After this update the driver is the default even if you said no to it before.
 - **`llm-tune` runs the fit test and the speed test separately.** For any model you can run either one. The fit test now also checks system RAM. It measures every model with MTP off, and with MTP on when it has an MTP head, including a head that comes as a separate file (the Qwen3.8-27B files). When MTP on does not fit, it measures MTP off right after.
 - **A newer llama.cpp build, PrismML prism-b12232** (released 2026-11-26). After this update the launcher offers to run `setup.sh`, which installs it. The numbers under *What was measured* come from the build before, prism-b12178; `llm-tune --fit` measures what fits with the new one.
 - **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to 1.75 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
@@ -78,7 +81,7 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
 
 - **llama.cpp, PrismML build prism-b12232,** into `~/llama-prism`. This build runs the Ternary Bonsai models. It uses the CUDA 12.8 build, or 12.4 for an older driver.
 - **opencode 1.18.34,** the version everything was tested with. **Don't upgrade opencode yet:** the plugins use opencode hooks that newer versions may change.
-- **The opencode plugins,** both in this kit: the system-prompt plugin with the v1.2 prompt, and two parts of the compaction-anchor plugin (see *What the launcher changes*).
+- **The opencode plugins,** all in this kit: the system-prompt plugin with the v1.2 prompt, the task driver, and two parts of the compaction-anchor plugin for the lighter setup (see *What the launcher changes*).
 - **Your models.** Setup finds the models you already have anywhere in your home folder or on another mounted drive: the Hugging Face cache, `~/models`, `~/Downloads`, LM Studio's folders and so on.
   - It covers Bonsai 2.5 27B (with the Uncensored edit), Bonsai 2 9B, Ornith 1.5 9B, and the new models above.
   - It says which files were tested and adds their folders to the launcher's search.
@@ -146,7 +149,7 @@ It asks, in order:
 
 For a model that runs partly from system RAM, it also says how much free RAM the model needs and how much there is. If there isn't enough, it warns you before starting.
 
-5. **Task driver:** *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* The default is no, or your answer from last time.
+5. **The lighter setup:** *Use the lighter setup, without the task driver? The task driver is much more reliable on complex tasks, but can take much longer (on a single problem the two cost about the same).* The default is no (the driver), or your answer from last time.
 6. **How the agent should work:** *(a) as autonomously as possible*, *(p) plan first* or *(i) interactive*. Type `a`, `p` or `i`. The default is autonomous, or your answer from last time. See *How the agent works*.
 
 If the model server fails to start:
@@ -169,7 +172,8 @@ Plan first and interactive each replace the prompt's *Questions* section with th
 - **Switching:** answer the launcher's question, or type `/autonomous`, `/plan-first` or `/interactive` in opencode. A switch applies to the current session; a new session (`/new`) starts in the mode you chose in the launcher.
 - **The command sends a message.** A notice shows which mode is on. The model gets a one-line note that the mode changed, replies, and carries on with any work in progress. After `/plan-first`, it asks its questions first if it has any.
 - **A switch costs one slow reply.** It changes the system prompt, which comes before the whole conversation, so the next reply reads the conversation again. The same happens once when plan first's planning ends. On a model that runs partly from system RAM, that can take minutes in a long session.
-- **With the task driver on, use autonomous for now.** The driver was built for unattended work. When the model stops to ask in plain text, the driver can prompt it to carry on before you answer, and it takes your typed answer for a new request. Answers given through the question tool don't have this problem.
+- **With the task driver (the default):** in interactive mode, and in plan first while it is planning, the driver keeps your typed answers with the work. Before it has made a task list, an answer is added to your request; during a task, it is kept as a note on that task. It also sends no prompts of its own to carry on while you are there to answer. After plan first's planning, and in autonomous mode, it works as it always does. Answers given through the question tool stay inside the model's turn, so they work the same either way.
+- **One limit with the driver:** until the model starts a task list, the driver gives its task tools short descriptions. It can only tell sessions apart while opencode runs one of them: after `/new`, the task tools keep their short descriptions in every session of that opencode. The task list it shows the model still carries the rules.
 
 ### Models that run partly from system RAM
 
@@ -395,19 +399,18 @@ The Uncensored Bonsai 2.5 edit runs with Bonsai 2.5's settings.
 - **`~/.config/opencode/opencode.json`:** it adds the model under a `llama-local` provider, with its context limit. The file is backed up once, to `opencode.json.bak-llm-launch`.
 - **The opencode sessions it starts also get the following,** which is not saved in your opencode config. Opening opencode yourself gives you stock opencode, with these models available. Stock opencode has neither the compaction plugin nor the task driver, so a long session there can lose your request when opencode summarizes it: start coding sessions with `llm-launch`. The list comes from `kit.json`, and a kit update can change it. The launcher prints the current setup's name as opencode starts.
   - **The v1.2 system prompt** (`prompts/v1-2.md`, delivered by `plugins/system-prompt.js`). It replaces opencode's own general instructions. Opencode's lines about the model and the environment, your project's `AGENTS.md` instructions and the list of skills all stay as opencode writes them, in the one system message.
-  - **"Continue with the task."** in place of opencode's automatic "continue, or stop and ask" turn after it summarizes a long session.
-  - **Two parts of the compaction-anchor plugin** (`plugins/compaction-anchor.js`), which act only after a summary:
-    - the original request again, word for word;
-    - a task checklist that marks each item of the request as done, in progress, or not started. The model is asked to make its todo list match it.
-  - Each time a session is summarized, the plugin also saves the whole conversation so far to a text file in `~/.local/share/opencode/history/`.
+  - **The task driver** (`plugins/opencode-task-driver-0.4.2.js`, focus mode). When a request holds several separate problems, it has the model file them as tasks, and works them one at a time, each on a clean slate with a short handoff from the tasks before. After a summary it brings back the current task, and it handles the turn after the summary itself. A single-problem request runs as one task, with only a short line added.
   - **No cap on the length of one answer** (`OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`). The model entry's output limit is the whole context.
   - **The interaction-mode plugin** (`plugins/interaction-mode.js`), started in the mode you chose. In autonomous mode it changes nothing in the prompt and leaves the question tool out. Plan first and interactive (untested) replace the prompt's *Questions* section. It adds the `/autonomous`, `/plan-first` and `/interactive` commands, and records each switch in `~/.local/share/opencode/interaction-mode/`.
 
-- **With the task driver turned on,** the session gets a different set:
+- **With the lighter setup,** the session gets a different set:
   - the same v1.2 system prompt;
-  - the **task driver** (`plugins/opencode-task-driver-0.4.1.js`, focus mode). When a request holds several separate problems, it has the model file them as tasks, and works them one at a time, each on a clean slate with a short handoff from the tasks before. After a summary it brings back the current task, and it handles the turn after the summary itself. A single-problem request runs as one task.
-  - The compaction-anchor parts are left out, because the task driver does that work for each task.
-  - the same interaction-mode plugin.
+  - **"Continue with the task."** in place of opencode's automatic "continue, or stop and ask" turn after it summarizes a long session;
+  - **two parts of the compaction-anchor plugin** (`plugins/compaction-anchor.js`), which act only after a summary:
+    - the original request again, word for word;
+    - a task checklist that marks each item of the request as done, in progress, or not started. The model is asked to make its todo list match it.
+  - Each time a session is summarized, the plugin also saves the whole conversation so far to a text file in `~/.local/share/opencode/history/`.
+  - the same interaction-mode plugin, and no cap on the length of one answer.
 - **`~/.config/llm-launch/`:** your choices, downloaded plugins, and `llm-tune`'s measurements.
 - **`~/models/<repo>/`:** the models you download from the launcher's menu.
 - **`~/.cache/llm-launch/`:** the model server's logs.

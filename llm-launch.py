@@ -27,11 +27,11 @@ Server settings that match the tested setup: q4_0 K/V cache, all layers on the G
 time, the model's own recommended sampling. A mixture-of-experts model bigger than the card (Gemma 4 26B-A4B, Qwen 3.6 /
 Ornith 1.5 35B-A3B) keeps the experts of its first layers in system RAM (-ot ...=CPU), the layout that was tested.
 opencode gets the plugins and settings kit.json names, for these sessions only. Today (kit.json "setups"):
-  - standard (the default): the v1.2 system prompt in place of opencode's own instructions (plugins/system-prompt.js +
-    prompts/v1-2.md; your project's AGENTS.md is kept), "Continue with the task." after a summary, and two parts of the
-    compaction-anchor plugin: after a summary, the original request word for word and a task checklist.
-  - task driver (asked at each start, off unless you turn it on): opencode-task-driver 0.4.1 in focus mode (a request with
-    several problems is split into tasks, worked one at a time) with the v1.2 prompt.
+  - task driver (the default): the v1.2 system prompt in place of opencode's own instructions (plugins/system-prompt.js +
+    prompts/v1-2.md; your project's AGENTS.md is kept) with opencode-task-driver 0.4.2 in focus mode (a request with
+    several problems is split into tasks, worked one at a time; it handles the turn after a summary).
+  - standard (the lighter setup, asked at each start): the v1.2 prompt, "Continue with the task." after a summary, and
+    two parts of the compaction-anchor plugin: after a summary, the original request word for word and a task checklist.
   - both also get plugins/interaction-mode.js: the launcher asks at each start how the agent should work: autonomous
     (the tested mode and the default: the prompt exactly as tested), plan first (it asks its questions up front, then
     works on its own; untested) or interactive (it asks its questions up front and as they come up; untested).
@@ -893,16 +893,20 @@ def fetch_plugins(kit=None, quiet=False):
 
 def choose_setup(st, kit=None):
     """Which of kit.json's setups this session uses: the default, or another one the person turns on (each non-default
-    setup is a yes / no question with its own description; the answer is remembered as the next default)."""
+    setup is a yes / no question with its own description; the answer is remembered as the next default). An answer
+    given while another setup was the kit's default no longer counts: a kit update that makes a new setup the default
+    reaches everyone, and the question still offers the other one at each start."""
     sets = kit_setups(kit)
-    cur = setup_of(st.get("setup"), kit)
+    remembered = st.get("setup") if st.get("setup_default") == sets[0]["id"] else None
+    cur = setup_of(remembered, kit)
     if len(sets) < 2 or not sys.stdin.isatty(): return cur["id"]
+    def keep(sid):
+        st["setup"] = sid; st["setup_default"] = sets[0]["id"]; save_state(st); return sid
     print()
     for s in sets[1:]:
         if yes(f"{B}{s.get('ask') or 'Use ' + s.get('name', s['id'])}{N}", default=cur["id"] == s["id"]):
-            st["setup"] = s["id"]; save_state(st); return s["id"]
-    st["setup"] = sets[0]["id"]; save_state(st)
-    return sets[0]["id"]
+            return keep(s["id"])
+    return keep(sets[0]["id"])
 
 
 MODES = ("autonomous", "plan-first", "interactive")
@@ -979,8 +983,9 @@ def usable_setup(setup_id, kit=None):
 def session_config(prov, setup_id=None, mode=None):
     """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the plugins of
     the chosen kit.json setup (today's default: the v1.2 system prompt in place of opencode's own instructions, your
-    project's AGENTS.md kept, "Continue with the task." after a summary, and the compaction-anchor plugin's checklist and
-    reinsert parts; every setup also has the interaction-mode plugin, started in `mode` when given), kit.json's
+    project's AGENTS.md kept, and the task driver 0.4.2; the lighter one has "Continue with the task." after a summary
+    and the compaction-anchor plugin's checklist and reinsert parts instead of the driver; every setup also has the
+    interaction-mode plugin, started in `mode` when given), kit.json's
     opencode settings (the compaction reserve used in the tests), plus the model entry (in case opencode.json could not
     be edited)."""
     kit = load_kit()

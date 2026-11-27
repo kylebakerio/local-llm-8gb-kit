@@ -19,14 +19,41 @@
     "section. The launcher asks at each start which mode to start in and passes it as the plugin's 'default'.",
     "Before pushing a change here: python3 check-kit.py --fetch"
   ],
-  "setup": "v1.2 prompt + checklist + reinsert",
+  "setup": "task driver 0.4.2 + v1.2 prompt",
   "setup_version": 3,
   "opencode": "1.18.34",
   "setups": [
     {
-      "id": "standard",
+      "id": "task-driver",
       "default": true,
+      "name": "task driver 0.4.2 + v1.2 prompt",
+      "plugins": [
+        {
+          "name": "system prompt v1.2 (in place of opencode's own instructions; the task driver handles the turn after a summary)",
+          "file": "plugins/system-prompt.js",
+          "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
+          "prompt_sha256": "3583abaede2d9155461515d5f826c4bb66912433fc1ff173edd72c81abb35885",
+          "options": {"file": "{kit}/prompts/v1-2.md"}
+        },
+        {
+          "name": "task driver 0.4.2 (focus mode: a request with several problems is split into tasks, worked one at a time; a single problem runs as one task, with only a short line added)",
+          "file": "plugins/opencode-task-driver-0.4.2.js",
+          "sha256": "34faa56d695c973c9e7d55b53d6b20d42718efa24724a6d41a4edb038efe40d0",
+          "options": {"mode": "focus"}
+        },
+        {
+          "name": "interaction modes (autonomous = the v1.2 prompt exactly, the tested mode and the default; plan-first and interactive UNTESTED: they replace its Questions section; the launcher asks at each start, /autonomous /plan-first /interactive switch)",
+          "file": "plugins/interaction-mode.js",
+          "sha256": "190578976244d2d156bd8c156a6f9c646c73a0e775527d73fbd45d2fce12cfba",
+          "untested": true,
+          "options": {"default": "autonomous"}
+        }
+      ]
+    },
+    {
+      "id": "standard",
       "name": "v1.2 prompt + checklist + reinsert",
+      "ask": "Use the lighter setup, without the task driver? The task driver is much more reliable on complex tasks, but can take much longer (on a single problem the two cost about the same)",
       "plugins": [
         {
           "name": "compaction-anchor (checklist + reinsert: after a summary, a task checklist and the original request word for word)",
@@ -40,33 +67,6 @@
           "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
           "prompt_sha256": "3583abaede2d9155461515d5f826c4bb66912433fc1ff173edd72c81abb35885",
           "options": {"file": "{kit}/prompts/v1-2.md", "continueText": "Continue with the task."}
-        },
-        {
-          "name": "interaction modes (autonomous = the v1.2 prompt exactly, the tested mode and the default; plan-first and interactive UNTESTED: they replace its Questions section; the launcher asks at each start, /autonomous /plan-first /interactive switch)",
-          "file": "plugins/interaction-mode.js",
-          "sha256": "190578976244d2d156bd8c156a6f9c646c73a0e775527d73fbd45d2fce12cfba",
-          "untested": true,
-          "options": {"default": "autonomous"}
-        }
-      ]
-    },
-    {
-      "id": "task-driver",
-      "name": "task driver 0.4.1 + v1.2 prompt",
-      "ask": "Turn on the task driver? It is much more reliable on complex tasks, but can take much longer",
-      "plugins": [
-        {
-          "name": "system prompt v1.2 (in place of opencode's own instructions; the task driver handles the turn after a summary)",
-          "file": "plugins/system-prompt.js",
-          "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
-          "prompt_sha256": "3583abaede2d9155461515d5f826c4bb66912433fc1ff173edd72c81abb35885",
-          "options": {"file": "{kit}/prompts/v1-2.md"}
-        },
-        {
-          "name": "task driver 0.4.1 (focus mode: a request with several problems is split into tasks, worked one at a time)",
-          "file": "plugins/opencode-task-driver-0.4.1.js",
-          "sha256": "bad0a8e04e939152c00b515c76fa62ef832fc2dd19ed4c7495520ffe44998675",
-          "options": {"mode": "focus"}
         },
         {
           "name": "interaction modes (autonomous = the v1.2 prompt exactly, the tested mode and the default; plan-first and interactive UNTESTED: they replace its Questions section; the launcher asks at each start, /autonomous /plan-first /interactive switch)",
