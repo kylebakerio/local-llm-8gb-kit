@@ -23,9 +23,10 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
   | Ornith 1.5 35B-A3B (IQ3_XXS) | 15.3 GB | Mixture of experts, with an MTP head. It is built on the same 35B-A3B design as the Qwen model above, and packed the same way. |
 
   The three mixture-of-experts files need about 45 GB of disk between them. The launcher checks free space before each download.
-- **A new system prompt, v1.1.** It replaces opencode's long built-in instructions. It also replaces the short "slim" prompt this kit used before. Your project's `AGENTS.md` is kept.
+- **A new system prompt, v1.2.** It replaces opencode's long built-in instructions. It also replaces the short "slim" prompt this kit used before. Your project's `AGENTS.md` is kept.
   - Why: its first version, v1, nearly doubled Bonsai 2.5 27B's score on our multi-bug tests, compared with opencode's own prompt: 11 of 15 bugs fixed against 6 of 15 (7/9 and 4/6, against 4/9 and 2/6). On single bugs the two were about level so far.
   - v1.1 is v1 with some extra work trimmed. The model keeps a todo list only when a request has more than one problem. It updates that list along with its next step. It doesn't re-read code it has just edited. In first small tests on two other models, v1.1 did about as well as v1, or better. On one it fixed 9 of 11 against v1's 10 of 11, at the same cost. On the other it fixed 4 of 4 single bugs against 2 of 4, with about a third fewer tokens, and matched v1 on two multi-bug tests (5 of 6 and 7 of 9). Tests on Bonsai are running.
+  - v1.2 is v1.1 with its rules about asking moved into a section of their own, *Questions*: work without asking until the work is done, and where something is unclear, make the most sensible assumption, note it and keep going. Its final message now also lists the assumptions it made and any questions that blocked it, each with what the answer would decide.
   - When opencode summarizes a long session, the model is now told "Continue with the task." Before, it was told to continue or to stop and ask.
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
 - **The task driver is now your choice, and off by default.** At each start the launcher asks: *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* It remembers your answer for the next time. This is a newer version, 0.4.1, than the one the kit had before. See *What the launcher changes*.
@@ -33,7 +34,7 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 - **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to 1.75 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
 - **Every session now has the compaction plugin or the task driver.** In a test without either, after many summaries a model no longer had the bugs it was asked to fix, and asked for them again. If the plugin your setup needs is missing, the launcher uses the other setup, or stops and says what to do.
 - **No cap on the length of one answer.** opencode normally cuts an answer off at 32,000 tokens. The launcher lifts that, as in our tests, so an answer ends only when the model stops or the context is full.
-- **Interactive mode, UNTESTED, off by default.** At each start the launcher now asks: *Do you want the agent to work as autonomously as possible (a: good for long or overnight sessions; it makes its best assumptions and gets all the work done), or will you be around (i: it asks you the questions that come up and goes through design decisions with you; untested)?* Autonomous is the setup that was tested, and stays the default. Inside opencode, `/interactive` and `/autonomous` switch the current session. See *Interactive mode (untested)*.
+- **Three ways for the agent to work; autonomous stays the default.** At each start the launcher asks *How should the agent work?* (a) as autonomously as possible, the tested mode; (p) plan first: it asks its questions up front, then works on its own; (i) interactive: it asks questions as they come up. Plan first and interactive are untested. Inside opencode, `/autonomous`, `/plan-first` and `/interactive` switch the current session. See *How the agent works*.
 
 ## One-time setup
 
@@ -73,7 +74,7 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
 
 - **llama.cpp, PrismML build prism-b12178,** into `~/llama-prism`. This build runs the Ternary Bonsai models. It uses the CUDA 12.8 build, or 12.4 for an older driver.
 - **opencode 1.18.34,** the version everything was tested with. **Don't upgrade opencode yet:** the plugins use opencode hooks that newer versions may change.
-- **The opencode plugins,** both in this kit: the system-prompt plugin with the v1.1 prompt, and two parts of the compaction-anchor plugin (see *What the launcher changes*).
+- **The opencode plugins,** both in this kit: the system-prompt plugin with the v1.2 prompt, and two parts of the compaction-anchor plugin (see *What the launcher changes*).
 - **Your models.** Setup finds the models you already have anywhere in your home folder or on another mounted drive: the Hugging Face cache, `~/models`, `~/Downloads`, LM Studio's folders and so on.
   - It covers Bonsai 2.5 27B (with the Uncensored edit), Bonsai 2 9B, Ornith 1.5 9B, and the new models above.
   - It says which files were tested and adds their folders to the launcher's search.
@@ -142,7 +143,7 @@ It asks, in order:
 For a model that runs partly from system RAM, it also says how much free RAM the model needs and how much there is. If there isn't enough, it warns you before starting.
 
 5. **Task driver:** *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* The default is no, or your answer from last time.
-6. **Interactive or autonomous:** *Do you want the agent to work as autonomously as possible (a: good for long or overnight sessions; it makes its best assumptions and gets all the work done), or will you be around (i: it asks you the questions that come up and goes through design decisions with you; untested)?* Type `i` or `a`. The default is autonomous, or your answer from last time. See *Interactive mode (untested)*.
+6. **How the agent should work:** *(a) as autonomously as possible*, *(p) plan first* or *(i) interactive*. Type `a`, `p` or `i`. The default is autonomous, or your answer from last time. See *How the agent works*.
 
 If the model server fails to start:
 - The launcher shows the error.
@@ -151,21 +152,20 @@ If the model server fails to start:
 
 When you quit opencode, it asks whether to stop the server.
 
-### Interactive mode (untested)
+### How the agent works: autonomous, plan first, interactive
 
-The kit was tested in **autonomous** mode only: the model is given the work and keeps going until it is done, asking only when it cannot continue. That suits a long list left to run overnight. **Interactive** is for when you are around and would rather be asked than have it guess. It has not been tested at all, so autonomous stays the default.
+- **Autonomous** (the default, and the only mode the kit was tested in): the model works without asking anything until the work is done. Where something is unclear, it makes the most sensible assumption, notes it and keeps going. Its final message lists the assumptions it made and any questions that blocked it. Good for long or overnight sessions. It gets the v1.2 prompt exactly as tested, and the same tools: opencode's *question* tool, which shows you a multiple-choice question, is left out.
+- **Plan first** (untested): you are there at the start, but will be away while it works. Before changing anything, it takes a quick look at the code and asks all its questions in one round, then waits for your answers. After that it works on its own, as in autonomous mode.
+  - The planning ends at whichever comes first: its first change to a file (an edit, or a command that plainly writes a file), its filing a task list, your answer to its questions, or your first message after its first reply.
+  - From then on the session runs autonomous, except that the question tool stays in its list; a question then gets the answer "Questions wait until the end", and the model goes on.
+- **Interactive** (untested): you are at the keyboard. It takes a quick look first, so that its questions are specific, then asks them all at once, early, before the long work (with a list of tasks, before starting them). Meanwhile it does the parts that don't depend on your answers. It asks before anything destructive or hard to undo. It never asks whether to keep going, or has you paste again what is already in the conversation. Once you have answered, it keeps going until the work is done.
 
-- **Switching:** answer `i` to the launcher's question, or type `/interactive` in opencode. `/autonomous` switches back. A switch applies to the current session; a new session (`/new`) starts in the mode you chose in the launcher.
-- **What it changes:** in interactive mode, a short note is added at the end of the system prompt. It tells the model that you are at the keyboard, and asks it:
-  - to look at the code first, then ask its questions all at once, early, before the long work (with a list of tasks, before starting them);
-  - to go on with the parts that do not depend on your answers;
-  - to ask before anything destructive or hard to undo;
-  - never to ask whether to keep going, or to have you paste again what is already in the conversation;
-  - once you have answered, to keep going until the work is done.
-- **In autonomous mode** the plugin changes nothing the model sees: it gets exactly what it would get without the plugin.
-- **A switch costs one slow reply.** It changes the system prompt, which comes before the whole conversation, so the next reply reads the conversation again. On a model that runs partly from system RAM, that can take minutes in a long session.
-- **The command sends a message.** A notice shows which mode is on. The model gets a one-line note that the mode changed, replies, and carries on with any work in progress.
-- **With the task driver on, use autonomous for now.** The driver was built for unattended work. It can prompt the model to carry on before you answer, and it takes your answer for a new request.
+Plan first and interactive each replace the prompt's *Questions* section with their own, so the prompt never says both "don't ask" and "ask". Every other part of the prompt stays as it is, including the final message that lists assumptions and blocking questions.
+
+- **Switching:** answer the launcher's question, or type `/autonomous`, `/plan-first` or `/interactive` in opencode. A switch applies to the current session; a new session (`/new`) starts in the mode you chose in the launcher.
+- **The command sends a message.** A notice shows which mode is on. The model gets a one-line note that the mode changed, replies, and carries on with any work in progress. After `/plan-first`, it asks its questions first if it has any.
+- **A switch costs one slow reply.** It changes the system prompt, which comes before the whole conversation, so the next reply reads the conversation again. The same happens once when plan first's planning ends. On a model that runs partly from system RAM, that can take minutes in a long session.
+- **With the task driver on, use autonomous for now.** The driver was built for unattended work. When the model stops to ask in plain text, the driver can prompt it to carry on before you answer, and it takes your typed answer for a new request. Answers given through the question tool don't have this problem.
 
 ### Models that run partly from system RAM
 
@@ -372,7 +372,7 @@ The test conditions:
   - Ornith often repeated itself without changing anything until it was stopped.
 - **Speed:** each model ran half its bugs on the RTX 3060 and half on an RTX 4090 Laptop, also held to 8 GB. Her laptop measured slower than both (see *On her laptop*), so her runs will take longer.
 - **Plugins:** the tests used an earlier version of the compaction plugin in place of the task driver, and ran the 27B models at 90,112 tokens of context; the launcher suggests 88,064. A later test of the launcher's own setup was stopped partway, in favour of a new system prompt. On the 8 bugs it finished, every setup fixed 7 or 8, so the plugins made no clear difference there.
-- **The new system prompt (v1):** on two tests that each hold several bugs, Bonsai 2.5 27B fixed 7 of 9 and 4 of 6 with it, against 4 of 9 and 2 of 6 with opencode's own prompt: 11 of 15 against 6 of 15. On single bugs the two were about level so far. This kit now uses v1.1 (see *What changed*). The new models are being tested with v1 and the checklist-and-request parts of the compaction plugin.
+- **The new system prompt (v1):** on two tests that each hold several bugs, Bonsai 2.5 27B fixed 7 of 9 and 4 of 6 with it, against 4 of 9 and 2 of 6 with opencode's own prompt: 11 of 15 against 6 of 15. On single bugs the two were about level so far. This kit now uses v1.2 (see *What changed*). The new models are being tested with v1 and the checklist-and-request parts of the compaction plugin.
 
 Every model runs with its makers' recommended sampling settings, which the launcher sets itself:
 
@@ -390,19 +390,20 @@ The Uncensored Bonsai 2.5 edit runs with Bonsai 2.5's settings.
 
 - **`~/.config/opencode/opencode.json`:** it adds the model under a `llama-local` provider, with its context limit. The file is backed up once, to `opencode.json.bak-llm-launch`.
 - **The opencode sessions it starts also get the following,** which is not saved in your opencode config. Opening opencode yourself gives you stock opencode, with these models available. Stock opencode has neither the compaction plugin nor the task driver, so a long session there can lose your request when opencode summarizes it: start coding sessions with `llm-launch`. The list comes from `kit.json`, and a kit update can change it. The launcher prints the current setup's name as opencode starts.
-  - **The v1.1 system prompt** (`prompts/v1-1.md`, delivered by `plugins/system-prompt.js`). It replaces opencode's own general instructions. Opencode's lines about the model and the environment, your project's `AGENTS.md` instructions and the list of skills all stay as opencode writes them, in the one system message.
+  - **The v1.2 system prompt** (`prompts/v1-2.md`, delivered by `plugins/system-prompt.js`). It replaces opencode's own general instructions. Opencode's lines about the model and the environment, your project's `AGENTS.md` instructions and the list of skills all stay as opencode writes them, in the one system message.
   - **"Continue with the task."** in place of opencode's automatic "continue, or stop and ask" turn after it summarizes a long session.
   - **Two parts of the compaction-anchor plugin** (`plugins/compaction-anchor.js`), which act only after a summary:
     - the original request again, word for word;
     - a task checklist that marks each item of the request as done, in progress, or not started. The model is asked to make its todo list match it.
   - Each time a session is summarized, the plugin also saves the whole conversation so far to a text file in `~/.local/share/opencode/history/`.
   - **No cap on the length of one answer** (`OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`). The model entry's output limit is the whole context.
-  - **The interactive-mode plugin** (`plugins/interactive.js`, untested), started in the mode you chose. In autonomous mode it changes nothing the model sees. It adds the `/interactive` and `/autonomous` commands, and records each switch in `~/.local/share/opencode/interactive/`.
+  - **The interaction-mode plugin** (`plugins/interaction-mode.js`), started in the mode you chose. In autonomous mode it changes nothing in the prompt and leaves the question tool out. Plan first and interactive (untested) replace the prompt's *Questions* section. It adds the `/autonomous`, `/plan-first` and `/interactive` commands, and records each switch in `~/.local/share/opencode/interaction-mode/`.
+
 - **With the task driver turned on,** the session gets a different set:
-  - the same v1.1 system prompt;
+  - the same v1.2 system prompt;
   - the **task driver** (`plugins/opencode-task-driver-0.4.1.js`, focus mode). When a request holds several separate problems, it has the model file them as tasks, and works them one at a time, each on a clean slate with a short handoff from the tasks before. After a summary it brings back the current task, and it handles the turn after the summary itself. A single-problem request runs as one task.
   - The compaction-anchor parts are left out, because the task driver does that work for each task.
-  - the same interactive-mode plugin.
+  - the same interaction-mode plugin.
 - **`~/.config/llm-launch/`:** your choices, downloaded plugins, and `llm-tune`'s measurements.
 - **`~/models/<repo>/`:** the models you download from the launcher's menu.
 - **`~/.cache/llm-launch/`:** the model server's logs.

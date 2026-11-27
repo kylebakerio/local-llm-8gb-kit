@@ -14,18 +14,19 @@
     "Only one plugin may replace opencode's own prompt (compaction-anchor's slim part or system-prompt.js), and only one may",
     "replace the turn after a summary (system-prompt.js continueText, compaction-anchor's no-stop-and-ask, or a task driver,",
     "which handles that turn itself); a task driver runs without the compaction-anchor parts. check-kit.py enforces these.",
-    "interactive.js (UNTESTED, marked \"untested\": true) rides along in every setup: off (\"autonomous\", the default here) it changes",
-    "nothing the model sees; the launcher asks at each start which mode to start in and passes it as the plugin's 'default'.",
+    "interaction-mode.js (marked \"untested\": true) rides along in every setup, after system-prompt.js: in autonomous mode (the default",
+    "here, the tested one) it changes nothing the model sees; plan-first and interactive (untested) replace the prompt's Questions",
+    "section. The launcher asks at each start which mode to start in and passes it as the plugin's 'default'.",
     "Before pushing a change here: python3 check-kit.py --fetch"
   ],
-  "setup": "v1.1 prompt + checklist + reinsert",
+  "setup": "v1.2 prompt + checklist + reinsert",
   "setup_version": 2,
   "opencode": "1.18.34",
   "setups": [
     {
       "id": "standard",
       "default": true,
-      "name": "v1.1 prompt + checklist + reinsert",
+      "name": "v1.2 prompt + checklist + reinsert",
       "plugins": [
         {
           "name": "compaction-anchor (checklist + reinsert: after a summary, a task checklist and the original request word for word)",
@@ -34,16 +35,16 @@
           "options": {"parts": ["checklist", "reinsert"]}
         },
         {
-          "name": "system prompt v1.1 (in place of opencode's own instructions; \"Continue with the task.\" after a summary)",
+          "name": "system prompt v1.2 (in place of opencode's own instructions; \"Continue with the task.\" after a summary)",
           "file": "plugins/system-prompt.js",
           "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
-          "prompt_sha256": "bdd1391138981fcc4b3008f877fa2d28983f61c2e2c9beee3510f2e9dec9cf02",
-          "options": {"file": "{kit}/prompts/v1-1.md", "continueText": "Continue with the task."}
+          "prompt_sha256": "22f9cf1d4f6f291ff93548e7c8412db2f9934ae94cfbde3623a8bf897650a4ef",
+          "options": {"file": "{kit}/prompts/v1-2.md", "continueText": "Continue with the task."}
         },
         {
-          "name": "interactive mode (UNTESTED; off by default = autonomous, the tested behaviour; the launcher asks at each start, /interactive and /autonomous switch it)",
-          "file": "plugins/interactive.js",
-          "sha256": "bee83a07e8138f974b91209ce6339e35cb78c666daf4be2b3b89b4349bfc33c4",
+          "name": "interaction modes (autonomous = the v1.2 prompt exactly, the tested mode and the default; plan-first and interactive UNTESTED: they replace its Questions section; the launcher asks at each start, /autonomous /plan-first /interactive switch)",
+          "file": "plugins/interaction-mode.js",
+          "sha256": "d4cccb98a5d9025c10a9f87f753afba88d2f499d70c2d2ead47cdb22e8737f93",
           "untested": true,
           "options": {"default": "autonomous"}
         }
@@ -51,15 +52,15 @@
     },
     {
       "id": "task-driver",
-      "name": "task driver 0.4.1 + v1.1 prompt",
+      "name": "task driver 0.4.1 + v1.2 prompt",
       "ask": "Turn on the task driver? It is much more reliable on complex tasks, but can take much longer",
       "plugins": [
         {
-          "name": "system prompt v1.1 (in place of opencode's own instructions; the task driver handles the turn after a summary)",
+          "name": "system prompt v1.2 (in place of opencode's own instructions; the task driver handles the turn after a summary)",
           "file": "plugins/system-prompt.js",
           "sha256": "cade1bb37241b67de1efb8dad990c9fd507f1c9b7a8ec67a9473a4842db73790",
-          "prompt_sha256": "bdd1391138981fcc4b3008f877fa2d28983f61c2e2c9beee3510f2e9dec9cf02",
-          "options": {"file": "{kit}/prompts/v1-1.md"}
+          "prompt_sha256": "22f9cf1d4f6f291ff93548e7c8412db2f9934ae94cfbde3623a8bf897650a4ef",
+          "options": {"file": "{kit}/prompts/v1-2.md"}
         },
         {
           "name": "task driver 0.4.1 (focus mode: a request with several problems is split into tasks, worked one at a time)",
@@ -68,9 +69,9 @@
           "options": {"mode": "focus"}
         },
         {
-          "name": "interactive mode (UNTESTED; off by default = autonomous, the tested behaviour; the launcher asks at each start, /interactive and /autonomous switch it)",
-          "file": "plugins/interactive.js",
-          "sha256": "bee83a07e8138f974b91209ce6339e35cb78c666daf4be2b3b89b4349bfc33c4",
+          "name": "interaction modes (autonomous = the v1.2 prompt exactly, the tested mode and the default; plan-first and interactive UNTESTED: they replace its Questions section; the launcher asks at each start, /autonomous /plan-first /interactive switch)",
+          "file": "plugins/interaction-mode.js",
+          "sha256": "d4cccb98a5d9025c10a9f87f753afba88d2f499d70c2d2ead47cdb22e8737f93",
           "untested": true,
           "options": {"default": "autonomous"}
         }

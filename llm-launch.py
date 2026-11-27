@@ -27,14 +27,15 @@ Server settings that match the tested setup: q4_0 K/V cache, all layers on the G
 time, the model's own recommended sampling. A mixture-of-experts model bigger than the card (Gemma 4 26B-A4B, Qwen 3.6 /
 Ornith 1.5 35B-A3B) keeps the experts of its first layers in system RAM (-ot ...=CPU), the layout that was tested.
 opencode gets the plugins and settings kit.json names, for these sessions only. Today (kit.json "setups"):
-  - standard (the default): the v1.1 system prompt in place of opencode's own instructions (plugins/system-prompt.js +
-    prompts/v1-1.md; your project's AGENTS.md is kept), "Continue with the task." after a summary, and two parts of the
+  - standard (the default): the v1.2 system prompt in place of opencode's own instructions (plugins/system-prompt.js +
+    prompts/v1-2.md; your project's AGENTS.md is kept), "Continue with the task." after a summary, and two parts of the
     compaction-anchor plugin: after a summary, the original request word for word and a task checklist.
   - task driver (asked at each start, off unless you turn it on): opencode-task-driver 0.4.1 in focus mode (a request with
-    several problems is split into tasks, worked one at a time) with the v1.1 prompt.
-  - both also get plugins/interactive.js (UNTESTED), and the launcher asks at each start whether you will be at the
-    keyboard (interactive: the model asks when it needs a decision) or leaving it to work (autonomous, the tested
-    behaviour and the default: the plugin then changes nothing). /interactive and /autonomous switch it inside opencode.
+    several problems is split into tasks, worked one at a time) with the v1.2 prompt.
+  - both also get plugins/interaction-mode.js: the launcher asks at each start how the agent should work: autonomous
+    (the tested mode and the default: the prompt exactly as tested), plan first (it asks its questions up front, then
+    works on its own; untested) or interactive (it asks as questions come up; untested). /autonomous, /plan-first and
+    /interactive switch it inside opencode.
 A newer tested setup arrives as a kit update (--update).
 EXL3 models (experimental): a folder whose config.json says quant_method "exl3" runs on TabbyAPI + exllamav3 instead
 (install-exl3.sh installs them into ~/exl3); the launcher writes TabbyAPI's config.yml with the lab's settings.
@@ -201,7 +202,7 @@ EXL3_RECOMMENDED = {
     "model-00001-of-00002.safetensors:8587658013": {"label": "Qwen3.8-27B EXL3 1.75 bpw", "ctx": {"mtp_off": 57344, "mtp_on": 34816},
                                                     "mtp_default": True, "draft_n": 2, "cache_mode": "4,4"},
 }
-# (the system prompt is prompts/v1-1.md, delivered by plugins/system-prompt.js; kit.json says which plugins a session gets)
+# (the system prompt is prompts/v1-2.md, delivered by plugins/system-prompt.js; kit.json says which plugins a session gets)
 
 B = "\033[1m" if sys.stdout.isatty() else ""
 D = "\033[2m" if sys.stdout.isatty() else ""
@@ -856,45 +857,50 @@ def choose_setup(st, kit=None):
     return sets[0]["id"]
 
 
-MODES = ("autonomous", "interactive")
-MODE_ASK = ("Do you want the agent to work as autonomously as possible (a: good for long or overnight sessions; it makes its "
-            "best assumptions and gets all the work done), or will you be around (i: it asks you the questions that come up "
-            "and goes through design decisions with you; untested)?")
+MODES = ("autonomous", "plan-first", "interactive")
+MODE_ASK = [
+    "How should the agent work?",
+    "  (a) as autonomously as possible: good for long or overnight sessions; it makes sensible assumptions, gets all the work",
+    "      done, and lists its assumptions and any blocking questions at the end",
+    "  (p) plan first: it asks its questions up front, then works on its own (untested)",
+    "  (i) interactive: it asks questions as they come up (untested)",
+]
 
 
-def _interactive(p):
-    return os.path.basename(p.get("file") or p.get("url") or "").lower().startswith("interactive")
+def _mode_plugin(p):
+    return os.path.basename(p.get("file") or p.get("url") or "").lower().startswith("interaction-mode")
 
 
 def kit_mode_default(kit=None):
-    """The mode kit.json starts a fresh install in (the interactive plugin's 'default' option), or None when no setup
-    has that plugin. autonomous is the tested behaviour: interactive is untested."""
+    """The mode kit.json starts a fresh install in (the interaction-mode plugin's 'default' option), or None when no setup
+    has that plugin. autonomous is the tested mode: plan-first and interactive are untested."""
     for s in kit_setups(kit):
         for p in s.get("plugins", []):
-            if _interactive(p):
+            if _mode_plugin(p):
                 d = (p.get("options") or {}).get("default")
                 return d if d in MODES else "autonomous"
     return None
 
 
 def choose_mode(st, kit=None):
-    """Interactive or autonomous for this session, asked at each start when the kit has the interactive plugin (None when it
-    has not); the answer is remembered as the next default."""
+    """autonomous, plan-first or interactive for this session, asked at each start when the kit has the interaction-mode
+    plugin (None when it has not); the answer is remembered as the next default."""
     start = kit_mode_default(kit)
     if start is None: return None
     cur = st.get("mode") if st.get("mode") in MODES else start
     if not sys.stdin.isatty(): return cur
+    print(f"\n{B}{MODE_ASK[0]}{N}"); print("\n".join(MODE_ASK[1:]))
     while True:
-        v = ask(f"{B}{MODE_ASK}{N} (i/a)", default=cur).strip().lower()
-        m = next((x for x in MODES if v and x.startswith(v)), None)
+        v = ask("a, p or i", default=cur[0]).strip().lower()
+        m = next((x for x in MODES if v and (x.startswith(v) or x.replace("-", " ") == v)), None)
         if m: break
-        print("   type i (interactive) or a (autonomous)")
+        print("   type a (autonomous), p (plan first) or i (interactive)")
     st["mode"] = m; save_state(st)
     return m
 
 
 def mode_label(mode):
-    return {"interactive": ", interactive (untested)", "autonomous": ", autonomous"}.get(mode, "")
+    return {"autonomous": ", autonomous", "plan-first": ", plan first (untested)", "interactive": ", interactive (untested)"}.get(mode, "")
 
 
 def _keeper(p):
@@ -924,9 +930,9 @@ def usable_setup(setup_id, kit=None):
 
 def session_config(prov, setup_id=None, mode=None):
     """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the plugins of
-    the chosen kit.json setup (today's default: the v1.1 system prompt in place of opencode's own instructions, your
+    the chosen kit.json setup (today's default: the v1.2 system prompt in place of opencode's own instructions, your
     project's AGENTS.md kept, "Continue with the task." after a summary, and the compaction-anchor plugin's checklist and
-    reinsert parts; every setup also has the untested interactive plugin, started in `mode` when given), kit.json's
+    reinsert parts; every setup also has the interaction-mode plugin, started in `mode` when given), kit.json's
     opencode settings (the compaction reserve used in the tests), plus the model entry (in case opencode.json could not
     be edited)."""
     kit = load_kit()
@@ -935,7 +941,7 @@ def session_config(prov, setup_id=None, mode=None):
     for p in setup_of(setup_id, kit).get("plugins", []):
         path = paths.get(p.get("file") or p.get("url"))
         opts = _subst(p.get("options") or {})
-        if _interactive(p) and mode in MODES: opts = dict(opts, default=mode)
+        if _mode_plugin(p) and mode in MODES: opts = dict(opts, default=mode)
         if path: plugins.append(["file://" + path, opts])
         else: print(f"{R}   this session runs without: {p['name']}{N}")
     cfg = {"provider": {PROVIDER: prov}, "plugin": plugins}
