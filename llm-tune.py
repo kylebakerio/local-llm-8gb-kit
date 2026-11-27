@@ -9,6 +9,9 @@
     llm-tune --one                                   pick one model and its settings (MTP, images on the CPU or the GPU)
     (they combine: llm-tune --fit --one, llm-tune --speed --redo, ...)
 
+Settings measured for a model: MTP off, plus MTP on when it has an MTP head, in its file or as a separate head file
+next to it (llama-server loads that file as the draft model); when MTP on does not fit, MTP off is measured right after.
+
 For each model and setting:
   1. FIT: first checks system RAM: a model that keeps part of itself in RAM (mixture of experts) needs that RAM free,
      and one that does not get it would load, pass the GPU check, then swap. Then finds the largest context that loads
@@ -558,13 +561,14 @@ def _tune_one(server, model, s, setting_key, idx, gname, native, logdir, t0, hl,
 
 
 def settings_for(model):
-    """Every setting worth measuring, without questions: MTP off, plus MTP on when the file has the head; images on the
-    CPU (the projector loaded there when it is next to the model); a mixture-of-experts file in its tested layout."""
+    """Every setting worth measuring, without questions: MTP off, plus MTP on when the model has a head (in its file, or
+    a separate head file next to it); images on the CPU (the projector loaded there when it is next to the model); a
+    mixture-of-experts file in its tested layout."""
     meta = L.gguf_meta(model["path"])
     proj = L.projector_for(model)
     draft_n = next((n for k, n in L.DRAFT_N.items() if model["name"].startswith(k)), 2)
     out = []
-    for mtp in ([False, True] if meta.get("nextn_predict_layers") else [False]):
+    for mtp in ([False, True] if meta.get("nextn_predict_layers") or L.separate_mtp_head(model) else [False]):
         out.append(({"mtp": mtp, "draft_n": draft_n, "proj": proj, "proj_gpu": False},
                     L.setting_key(model["name"], mtp, False, proj)))
     return out

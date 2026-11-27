@@ -13,7 +13,7 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
 
 ## What changed in this update
 
-- **New models to try.** Four models are being tested for this laptop right now. The launcher finds each one when its file is there, and runs it with the tested settings. Each download is optional and asked one at a time, with its size. Results come in a later update; until then, Bonsai 2.5 27B stays the one to use.
+- **New models to try.** Six models are being tested for this laptop right now. The launcher finds each one when its file is there, and runs it with the tested settings. Each download is optional and asked one at a time, with its size. Results come in a later update; until then, Bonsai 2.5 27B stays the one to use.
 
   | Model | Download | Notes |
   |---|---|---|
@@ -21,6 +21,8 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
   | Gemma 4 26B-A4B (UD-IQ4_XS) | 13.6 GB | A mixture-of-experts model: see *Models that run partly from system RAM*. It has no MTP head. |
   | Qwen 3.6 35B-A3B (IQ3_XXS) | 15.8 GB | Mixture of experts, with an MTP head. |
   | Ornith 1.5 35B-A3B (IQ3_XXS) | 15.3 GB | Mixture of experts, with an MTP head. It is built on the same 35B-A3B design as the Qwen model above, and packed the same way. |
+  | Qwen3.8-27B (UD-IQ1_S) | 6.2 GB, plus 1.4 GB for its MTP head | Qwen3.8-27B packed into 1 bit, the same size as Bonsai 2.5 27B, to compare the two. Its MTP head is a separate file; the launcher offers MTP only when that file is there. |
+  | Qwen3.8-27B (UD-IQ1_M) | 6.7 GB, plus the same MTP head | The same model in a slightly bigger 1-bit packing. Both files use one MTP head file, downloaded once. |
 
   The three mixture-of-experts files need about 45 GB of disk between them. The launcher checks free space before each download.
 - **A new system prompt, v1.2.** It replaces opencode's long built-in instructions. It also replaces the short "slim" prompt this kit used before. Your project's `AGENTS.md` is kept.
@@ -31,7 +33,8 @@ Every number below was measured on a GPU of the same generation (Ampere) as the 
   - When opencode summarizes a long session, the model is now told "Continue with the task." Before, it was told to continue or to stop and ask.
 - **After a summary, the request comes back.** The original request returns word for word, along with a checklist of which of its items are done. That is the setup the new models are being tested with.
 - **The task driver is now your choice, and off by default.** At each start the launcher asks: *Turn on the task driver? It is much more reliable on complex tasks, but can take much longer.* It remembers your answer for the next time. This is a newer version, 0.4.1, than the one the kit had before. See *What the launcher changes*.
-- **`llm-tune` runs the fit test and the speed test separately.** For any model you can run either one. The fit test now also checks system RAM.
+- **`llm-tune` runs the fit test and the speed test separately.** For any model you can run either one. The fit test now also checks system RAM. It measures every model with MTP off, and with MTP on when it has an MTP head, including a head that comes as a separate file (the Qwen3.8-27B files). When MTP on does not fit, it measures MTP off right after.
+- **A newer llama.cpp build, PrismML prism-b12232** (released 2026-11-26). After this update the launcher offers to run `setup.sh`, which installs it. The numbers under *What was measured* come from the build before, prism-b12178; `llm-tune --fit` measures what fits with the new one.
 - **A second engine, EXL3 (experimental).** It runs Qwen3.8-27B squeezed to 1.75 bits per weight. It is optional, and our tests of it are still running. See *EXL3 models (experimental)*.
 - **Every session now has the compaction plugin or the task driver.** In a test without either, after many summaries a model no longer had the bugs it was asked to fix, and asked for them again. If the plugin your setup needs is missing, the launcher uses the other setup, or stops and says what to do.
 - **No cap on the length of one answer.** opencode normally cuts an answer off at 32,000 tokens. The launcher lifts that, as in our tests, so an answer ends only when the model stops or the context is full.
@@ -73,7 +76,7 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
 
 `setup.sh` checks the GPU, the driver and the graphics mode, then installs the rest. Each step is skipped if it's already done, and every download is checked against its published checksum:
 
-- **llama.cpp, PrismML build prism-b12178,** into `~/llama-prism`. This build runs the Ternary Bonsai models. It uses the CUDA 12.8 build, or 12.4 for an older driver.
+- **llama.cpp, PrismML build prism-b12232,** into `~/llama-prism`. This build runs the Ternary Bonsai models. It uses the CUDA 12.8 build, or 12.4 for an older driver.
 - **opencode 1.18.34,** the version everything was tested with. **Don't upgrade opencode yet:** the plugins use opencode hooks that newer versions may change.
 - **The opencode plugins,** both in this kit: the system-prompt plugin with the v1.2 prompt, and two parts of the compaction-anchor plugin (see *What the launcher changes*).
 - **Your models.** Setup finds the models you already have anywhere in your home folder or on another mounted drive: the Hugging Face cache, `~/models`, `~/Downloads`, LM Studio's folders and so on.
@@ -101,9 +104,9 @@ No git? Use **Code → Download ZIP** on GitHub and unzip it to `~/local-llm-8gb
 ```bash
 # llama.cpp (PrismML build); for a driver older than 570 use ...-cuda-12.4-x64.tar.gz
 mkdir -p ~/llama-prism && cd ~/llama-prism
-curl -LO https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b12178-03ec600/llama-prism-b12178-03ec600-bin-linux-cuda-12.8-x64.tar.gz
-sha256sum llama-prism-b12178-03ec600-bin-linux-cuda-12.8-x64.tar.gz   # a50997fb29bb0684c00cdf21bb1382923c6bc70085a74c9c3d913dcf76af1899
-tar xzf llama-prism-b12178-03ec600-bin-linux-cuda-12.8-x64.tar.gz --strip-components=1
+curl -LO https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b12232-f702476/llama-prism-b12232-f702476-bin-linux-cuda-12.8-x64.tar.gz
+sha256sum llama-prism-b12232-f702476-bin-linux-cuda-12.8-x64.tar.gz   # 5aeef1a6c543765a488920a771c4cde0931b95f4cb52dfa9aa3c7e0e106d329f
+tar xzf llama-prism-b12232-f702476-bin-linux-cuda-12.8-x64.tar.gz --strip-components=1
 
 # opencode 1.18.34
 curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.34
@@ -132,7 +135,7 @@ Setup puts that command in `~/.local/bin`; in a terminal opened before setup, us
 It asks, in order:
 1. **Model:** pick one from the list.
 2. **MTP:** a draft head that makes writing faster but leaves less room for context.
-   - It is asked only for model files that contain one: Bonsai 2.5's `-mtp` files (the Uncensored edit's too), Bonsai 2 9B's `PQ2_0-MTP` file, Ornith 1.5 9B, the two 35B-A3B models, and the EXL3 models.
+   - It is asked only for model files that contain one: Bonsai 2.5's `-mtp` files (the Uncensored edit's too), Bonsai 2 9B's `PQ2_0-MTP` file, Ornith 1.5 9B, the two 35B-A3B models, and the EXL3 models. The Qwen3.8-27B files keep their head in a separate file, `MTP/mtp-Qwen3.8-27B-Q4_0.gguf`: it is asked when that file is there (the download menu gets it with the model). With a separate head, MTP is off by default until `llm-tune` has found that MTP on fits.
    - For any other file it says there is none and runs without it.
    - On 8 GB, MTP halves Bonsai 2.5's context, costs Ornith 1.5 9B about a quarter of its context, and costs Bonsai 2 9B nothing. On the 35B-A3B models it keeps the context and moves more of the model into system RAM instead (see *Models that run partly from system RAM*). The launcher's default follows that.
 3. **Images:** asked only if the model has an image file next to it. On the CPU (recommended) they cost no GPU memory. On the GPU, images are read faster, but there is less context.

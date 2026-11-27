@@ -56,17 +56,18 @@ case "$mode" in
 esac
 [ "${used:-0}" -gt 300 ] && echo "   Note: ${used} MiB of GPU memory is already in use; the tested contexts assume almost none (close apps on the NVIDIA GPU)."
 
-say "2. llama.cpp, PrismML build prism-b12178 (runs the Ternary Bonsai models)"
+PRISM=prism-b12232-f702476      # PrismML's 2026-11-26 release
+say "2. llama.cpp, PrismML build ${PRISM%-*} (runs the Ternary Bonsai models)"
 L=$HOME/llama-prism
-if [ -x "$L/llama-server" ] && "$L/llama-server" --version 2>&1 | grep -q "build 12178"; then
+if [ -x "$L/llama-server" ] && "$L/llama-server" --version 2>&1 | grep -q "build 12232"; then
     echo "   already installed: $L"
 else
-    if [ "${major:-0}" -ge 570 ]; then cu=12.8; sha=a50997fb29bb0684c00cdf21bb1382923c6bc70085a74c9c3d913dcf76af1899
-    else cu=12.4; sha=626dc154204531df146a428d455b53c64534b8f022e98cb0760881b48a35557e; fi
-    t=llama-prism-b12178-03ec600-bin-linux-cuda-$cu-x64.tar.gz
+    if [ "${major:-0}" -ge 570 ]; then cu=12.8; sha=5aeef1a6c543765a488920a771c4cde0931b95f4cb52dfa9aa3c7e0e106d329f
+    else cu=12.4; sha=b5750a2e4eb7369093d5ec7a1e82bf3e3772fefd5e398a46e8f245d4fb3490ed; fi
+    t=llama-$PRISM-bin-linux-cuda-$cu-x64.tar.gz
     echo "   downloading the CUDA $cu build (driver $drv)"
     mkdir -p "$L"
-    fetch "https://github.com/PrismML-Eng/llama.cpp/releases/download/prism-b12178-03ec600/$t" "$L/$t" "$sha" || { echo "   download failed; run this again"; exit 1; }
+    fetch "https://github.com/PrismML-Eng/llama.cpp/releases/download/$PRISM/$t" "$L/$t" "$sha" || { echo "   download failed; run this again"; exit 1; }
     tar xzf "$L/$t" -C "$L" --strip-components=1 && rm -f "$L/$t"
     echo "   installed: $("$L/llama-server" --version 2>&1 | grep -m1 version)"
 fi

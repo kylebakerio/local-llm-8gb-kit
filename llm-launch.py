@@ -96,7 +96,9 @@ RECOMMENDED = {
 # the files the numbers above were measured with, per model (shown when a different file of that model is found)
 TESTED_FILES = {"Ternary-Bonsai-2.5-27B": "PTQ1_0 (or PTQ1_0-mtp)", "Ternary-Bonsai-2-9B": "PTQ1_0 or PQ2_0-MTP-Q8_0",
                 "Ornith-1.5-9B": "Q4_K_M", "Ornith-1.5-35B-A3B": "IQ3_XXS (bartowski)", "Qwen_Qwen3.6-35B-A3B": "IQ3_XXS (bartowski)",
-                "gemma-4-26B-A4B-it": "UD-IQ4_XS (unsloth)"}
+                "gemma-4-26B-A4B-it": "UD-IQ4_XS (unsloth)", "Qwen3.8-27B": "UD-IQ1_S or UD-IQ1_M (unsloth; being tested)"}
+# files being tested for 8 GB that have no numbers yet: you choose their context, llm-tune --fit measures them
+BEING_TESTED = {"Qwen3.8-27B-UD-IQ1_S.gguf", "Qwen3.8-27B-UD-IQ1_M.gguf"}
 # Each model's own recommended sampling (thinking mode; Ornith: its "precise coding" set), from the model cards, as
 # llama-server flags. The tests use exactly these. A model not listed gets llama.cpp's defaults plus whatever its GGUF
 # file sets. Gemma 4 (Google's card) and Qwen 3.6 (its generation_config) leave min-p to llama.cpp's default, 0.05, as
@@ -108,10 +110,16 @@ SAMPLING = {
     "Ornith-1.5": "--temp 0.6 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0",
     "Qwen_Qwen3.6-35B-A3B": "--temp 1.0 --top-p 0.95 --top-k 20",
     "gemma-4-26B-A4B-it": "--temp 1.0 --top-p 0.95 --top-k 64",
+    "Qwen3.8-27B": "--temp 1.0 --top-p 0.95 --top-k 20",          # its generation_config (also in unsloth's GGUF)
 }
 # MTP draft length: PrismML's preset for Bonsai 2.5 27B; 1 for the 35B-A3B models (fastest with their experts in RAM:
 # Qwen wrote 39 t/s at 1 vs 32 at 2, Ornith 40 vs 29); 2 for the rest
 DRAFT_N = {"Ternary-Bonsai-2.5-27B": 3, "Qwen_Qwen3.6-35B-A3B": 1, "Ornith-1.5-35B-A3B": 1}
+# MTP heads that come as a separate file instead of inside the model file: unsloth's Qwen3.8-27B GGUFs ship one head,
+# MTP/mtp-Qwen3.8-27B-Q4_0.gguf, for every packing of the model (its own file holds no MTP layer). llama-server loads it
+# as the draft model of draft-mtp (-md FILE --spec-type draft-mtp; PrismML's build reads a file without the trunk layers
+# as MTP-only). Model file name prefix -> the head's path relative to the model's folder.
+MTP_HEADS = {"Qwen3.8-27B-": "MTP/mtp-Qwen3.8-27B-Q4_0.gguf"}
 CACHE_RAM_MIB = 2048      # LLAMA_ARG_CACHE_RAM: llama.cpp's prompt cache in system RAM (every tested run used 2048)
 RAM_ANON_MIB = 1024       # the server's own working memory in system RAM, besides the weights it maps (0.6-1.0 GiB measured)
 RAM_HEADROOM_MIB = 1024   # system RAM to leave free besides the server: opencode and the desktop
@@ -141,6 +149,16 @@ DOWNLOADS = [
     {"label": "Ornith 1.5 35B-A3B IQ3_XXS (experts in RAM, MTP; being tested)", "repo": "bartowski/Ornith-1.5-35B-A3B-GGUF",
      "rev": "64b0493d34a5ca4c1b4ad67bb99b41d74b4f07d6", "new": "2026-11-26",
      "files": [("Ornith-1.5-35B-A3B-IQ3_XXS.gguf", 15340447392, "8918ccb9ee29abe3875efec0c3e86f0e35ef0b8a03e3f0e1c422869859a518d0")]},
+    # Qwen3.8-27B at 1 bit (unsloth's UD-IQ1 packings): the size of Bonsai 2.5 27B, as a comparison for it. Their MTP head
+    # is a separate file in the same repo (MTP_HEADS), downloaded into the MTP folder next to the model.
+    {"label": "Qwen3.8-27B UD-IQ1_S (1 bit, the size of Bonsai 2.5) + its MTP head file (being tested)", "repo": "unsloth/Qwen3.8-27B-GGUF",
+     "rev": "4af51b3542f775b0a8e4b310bfb3f17e01c306c9", "new": "2026-11-27",
+     "files": [("Qwen3.8-27B-UD-IQ1_S.gguf", 6192222208, "3895b6eaa91e705c06ad1938d16c22e86f073c6a67df86260a1da79be3d1f887"),
+               ("MTP/mtp-Qwen3.8-27B-Q4_0.gguf", 1369590656, "50d9ce5a6da381bbcfb31061cf73df94a90e6faf8efeddee379a9cb8f1501c6e")]},
+    {"label": "Qwen3.8-27B UD-IQ1_M (1 bit, a little bigger) + its MTP head file (being tested)", "repo": "unsloth/Qwen3.8-27B-GGUF",
+     "rev": "4af51b3542f775b0a8e4b310bfb3f17e01c306c9", "new": "2026-11-27",
+     "files": [("Qwen3.8-27B-UD-IQ1_M.gguf", 6729166848, "1b5165a7149ea51e683c8eaf23372188ad9fc9d1a795386f7a1b558acf847dc6"),
+               ("MTP/mtp-Qwen3.8-27B-Q4_0.gguf", 1369590656, "50d9ce5a6da381bbcfb31061cf73df94a90e6faf8efeddee379a9cb8f1501c6e")]},
     {"label": "Qwen3.8-27B EXL3 1.75 bits per weight (turboderp; EXL3 engine, experimental)", "kind": "dir",
      "repo": "turboderp/Qwen3.8-27B-exl3", "rev": "2c1a38c2de43eab08cc8fba99656dc488e698cfb", "subdir": "turboderp__Qwen3.8-27B-exl3__SCP_1.75bpw", "needs": "exl3",
      "new": "2026-11-26",
@@ -383,7 +401,7 @@ def scan_models(st):
     found = {}
     def add(path, repo):
         name = os.path.basename(path)
-        if "mmproj" in name.lower(): return
+        if "mmproj" in name.lower() or name.lower().startswith("mtp-"): return      # image files and separate MTP heads
         m = re.search(r"-(\d{5})-of-(\d{5})\.gguf$", name)
         if m and m.group(1) != "00001": return                     # only the first part of a split model
         real = os.path.realpath(path)
@@ -436,6 +454,34 @@ def projector_for(model):
     return cands[0]
 
 
+def mtp_head_rel(model):
+    """The path, relative to the model's folder, of this model's separate MTP head file (MTP_HEADS), or None."""
+    return next((v for k, v in MTP_HEADS.items() if model.get("name", "").startswith(k)), None)
+
+
+def mtp_head_for(model):
+    """This model's separate MTP head file when it is there, else None: in the MTP folder next to the model (or right
+    beside it), or where the download menu puts it (~/models/<repo>/MTP/, also for a model in the Hugging Face cache).
+    A head the menu offers must have its published size (a cut-off file is not used)."""
+    rel = mtp_head_rel(model)
+    if not rel: return None
+    size = next((f[1] for x in DOWNLOADS for f in x["files"] if f[0] == rel), None)
+    d = model.get("dir") or os.path.dirname(model.get("path", ""))
+    places = [os.path.join(d, rel), os.path.join(d, os.path.basename(rel))]
+    places += [os.path.join(dl_dest(x), rel) for x in DOWNLOADS if any(f[0] == rel for f in x["files"])]
+    for p in places:
+        if os.path.isfile(p) and (size is None or os.path.getsize(p) == size): return p
+    return None
+
+
+def separate_mtp_head(model):
+    """The separate MTP head llama-server should load for this model: its head file when it is there and the model file
+    has no MTP layer of its own (a built-in head is used as it is), else None."""
+    if not mtp_head_rel(model): return None
+    if gguf_meta(model["path"]).get("nextn_predict_layers"): return None
+    return mtp_head_for(model)
+
+
 # ------------------------------------------------------------------ llama-server
 def find_server(st):
     cands = [st.get("llama_server"), shutil.which("llama-server"),
@@ -480,6 +526,8 @@ def server_argv(server, model, ctx, mtp, draft_n, proj, proj_gpu, port, cpu_laye
     argv += next((v.split() for k, v in SAMPLING.items() if model["name"].startswith(k)), [])
     if mtp:
         argv += ["--spec-type", "draft-mtp", "--spec-draft-n-max", str(draft_n), "--spec-draft-p-min", "0", "-ctkd", KV, "-ctvd", KV]
+        head = separate_mtp_head(model)
+        if head: argv += ["-md", head, "-ngld", "999"]          # a separate head file: the draft model, all on the GPU
     if proj:
         argv += ["--mmproj", proj] + ([] if proj_gpu else ["--no-mmproj-offload"])
     n = cpu_layers_for(model["name"], mtp) if cpu_layers is None else cpu_layers
@@ -1139,6 +1187,7 @@ def sha256_file(path, label=None):
 def fetch_file(d, name, size, sha, dest):
     """Download one file of a pinned revision into dest; it is kept only if its sha256 matches. True when it is there."""
     out = os.path.join(dest, name)
+    os.makedirs(os.path.dirname(out), exist_ok=True)          # a file in a subfolder of the repo (MTP/...)
     url = f"{HF}/{d['repo']}/resolve/{d['rev']}/{name}"
     hf = shutil.which("hf") if d.get("kind") != "dir" else None
     try:
@@ -1265,7 +1314,7 @@ def inventory(st):
         dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
         if "config.json" in files and exl3_info(root): exl3_found.append(root)
         for f in files:
-            if f.lower().endswith(".gguf") and "mmproj" not in f.lower() and any(f.startswith(k) for k in TESTED_FILES):
+            if f.lower().endswith(".gguf") and "mmproj" not in f.lower() and (any(f.startswith(k) for k in TESTED_FILES) or f in BEING_TESTED):
                 if not re.search(r"-(\d{5})-of-\d{5}\.gguf$", f) or "-00001-of-" in f: found.append(os.path.join(root, f))
     have_b25 = False
     if not found: print("   none of the models this kit tested were found")
@@ -1281,6 +1330,11 @@ def inventory(st):
             if rec.get("cpu_layers"): what += "; part of it runs from system RAM (mixture of experts)"
             if name.startswith("Ternary-Bonsai-2.5-27B"): have_b25 = True
         elif big: what = f"a bigger packing ({big}): on 8 GB use the PTQ1_0 file instead"
+        elif name in BEING_TESTED:
+            what = "being tested for 8 GB, no numbers yet: you choose its context (llm-tune --fit measures it here)"
+            if mtp_head_rel({"name": name}):
+                what += ("; its MTP head file is there" if mtp_head_for({"name": name, "path": path, "dir": os.path.dirname(path)})
+                         else f"; for MTP it needs its separate head file, {mtp_head_rel({'name': name})} (choose d in the launcher)")
         else:
             fam = next(k for k in TESTED_FILES if name.startswith(k))
             what = f"not tested here (the tested file is {TESTED_FILES[fam]}): you choose its context"
@@ -1423,12 +1477,16 @@ def choose(st, model, ask_ctx=True):
         print("   room for about 88,000 tokens of context. With this one there is far less, or none. (Download PTQ1_0: choose d.)")
     meta = gguf_meta(model["path"])
     rec = RECOMMENDED.get(model["name"], {})
-    has_mtp = bool(meta.get("nextn_predict_layers"))
+    head = separate_mtp_head(model)                         # a head in a separate file
+    has_mtp = bool(meta.get("nextn_predict_layers")) or bool(head)
     mem = st.setdefault("models", {}).setdefault(model["name"], {})
     mtp = False
     if not has_mtp:
         other = model["name"].replace(".gguf", "-mtp.gguf") if model["name"].startswith("Ternary-Bonsai-2.5-27B-PTQ1_0.gguf") else None
-        print(f"\n{B}MTP{N} (a draft head that speeds up writing): this file has none, so it runs without it."
+        rel = mtp_head_rel(model)
+        print(f"\n{B}MTP{N} (a draft head that speeds up writing): " + (f"this model's head is a separate file, {rel}, and it is not "
+              f"next to the model, so it runs without it.\n   {D}Choose d at the model menu to get it.{N}" if rel else
+              "this file has none, so it runs without it.")
               + (f"\n   {D}{other} has one: choose d at the model menu to get it.{N}" if other else ""))
     proj = projector_for(model)
     moe = bool(rec.get("cpu_layers"))
@@ -1439,7 +1497,10 @@ def choose(st, model, ask_ctx=True):
               f"{n_off} layers stay in system RAM" + (" (more with MTP on)." if has_mtp and cpu_layers_for(model["name"], True) else "."))
     ram = {m: ram_check(model, m, proj) for m in ([False, True] if has_mtp else [False])} if moe else {}
     if has_mtp:
-        print(f"\n{B}MTP{N} (a built-in draft head that makes generation faster).")
+        print(f"\n{B}MTP{N} (a " + ("draft head, in its own file next to the model," if head else "built-in draft head") + " that makes generation faster).")
+        if head:
+            print(f"   {D}The head file takes about {gib(os.path.getsize(head) / 2**20)} of the GPU's memory besides the model, so with MTP on"
+                  f" there is much less room for context. Not measured on 8 GB yet: llm-tune --fit measures both.{N}")
         on, off = rec.get("mtp_on"), rec.get("mtp_off")
         if moe and on:
             extra = cpu_layers_for(model["name"], True) - cpu_layers_for(model["name"], False)
@@ -1463,6 +1524,8 @@ def choose(st, model, ask_ctx=True):
             default = False
             print(f"   {R}Measured on this machine (llm-tune): with MTP on it does not fit{N} ({t_on.get('note') or 'not even at 4,096 tokens'});"
                   f" with MTP off it holds {t_off['suggested']:,} tokens. MTP off is suggested.")
+        if head and not (t_on and t_on.get("suggested")):   # a separate head: off until llm-tune found MTP on fits here
+            default = mem.get("mtp", False)
         if st.get("_mtp_failed", {}).get(model["name"]):     # it just failed to start with MTP on: suggest it off
             default = False
             print(f"   {D}It did not start with MTP on just now: MTP off leaves more room.{N}")

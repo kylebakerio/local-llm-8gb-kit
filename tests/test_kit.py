@@ -433,6 +433,169 @@ class TestEXL3(unittest.TestCase):
                 self.assertEqual(len(L.missing_files(d)), len(d["files"]))
 
 
+class TestSeparateMtpHead(unittest.TestCase):
+    """Qwen3.8-27B's 1-bit files keep their MTP head in a separate file (MTP/mtp-Qwen3.8-27B-Q4_0.gguf). The download
+    menu gets it with the model, the launcher offers MTP only when it is there and loads it as the draft model, and
+    llm-tune measures such a model with MTP off and on."""
+    REV = "4af51b3542f775b0a8e4b310bfb3f17e01c306c9"
+    HEAD = ("MTP/mtp-Qwen3.8-27B-Q4_0.gguf", 1369590656, "50d9ce5a6da381bbcfb31061cf73df94a90e6faf8efeddee379a9cb8f1501c6e")
+    FILES = {"Qwen3.8-27B-UD-IQ1_S.gguf": (6192222208, "3895b6eaa91e705c06ad1938d16c22e86f073c6a67df86260a1da79be3d1f887"),
+             "Qwen3.8-27B-UD-IQ1_M.gguf": (6729166848, "1b5165a7149ea51e683c8eaf23372188ad9fc9d1a795386f7a1b558acf847dc6")}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.t = self.tmp.name
+
+    def tearDown(self): self.tmp.cleanup()
+
+    def model(self, d, name="Qwen3.8-27B-UD-IQ1_S.gguf", nextn=0):
+        os.makedirs(d, exist_ok=True)
+        p = write_gguf(os.path.join(d, name), {"token_embd.weight": MIB, "blk.0.attn_q.weight": MIB},
+                       {"general.architecture": "qwen35", "qwen35.nextn_predict_layers": nextn, "qwen35.context_length": 262144})
+        return {"path": p, "name": name, "size": os.path.getsize(p), "dir": d, "repo": "test"}
+
+    def head(self, d, size=None):
+        p = os.path.join(d, self.HEAD[0]); os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f: f.truncate(self.HEAD[1] if size is None else size)       # sparse: no disk used
+        return p
+
+    def test_the_two_downloads_are_pinned_with_their_head(self):
+        ds = [d for d in L.DOWNLOADS if d["repo"] == "unsloth/Qwen3.8-27B-GGUF"]
+        self.assertEqual(len(ds), 2)
+        for d in ds:
+            self.assertEqual((d["rev"], d["new"]), (self.REV, "2026-11-27"))
+            (name, size, sha), head = d["files"]
+            self.assertEqual((size, sha), self.FILES[name])
+            self.assertEqual(head, self.HEAD)
+            self.assertIn("being tested", d["label"])
+            self.assertFalse(any(c in f[0] for f in d["files"] for c in "*?["), "exact names only, no patterns")
+        self.assertEqual(sorted(d["files"][0][0] for d in ds), sorted(self.FILES))
+
+    def test_a_file_in_the_repos_mtp_folder_is_saved_there(self):
+        import hashlib, io
+        body = b"h" * 1000
+        class R(io.BytesIO):
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+        d = {"repo": "a/b", "rev": "0" * 40}
+        with mock.patch.object(L.shutil, "which", lambda x: None), mock.patch.object(L.urllib.request, "urlopen", lambda *a, **k: R(body)):
+            self.assertTrue(L.fetch_file(d, "MTP/mtp-x.gguf", 1000, hashlib.sha256(body).hexdigest(), self.t))
+        self.assertTrue(os.path.isfile(os.path.join(self.t, "MTP", "mtp-x.gguf")))
+
+    def test_the_head_is_not_listed_as_a_model(self):
+        m = self.model(self.t); self.head(self.t)
+        write_gguf(os.path.join(self.t, "MTP", "mtp-other.gguf"), {"blk.64.nextn.eh_proj.weight": MIB})
+        with mock.patch.object(L, "DEFAULT_DIRS", [self.t]), mock.patch.object(L, "hf_cache", lambda: os.path.join(self.t, "none")):
+            self.assertEqual([x["name"] for x in L.scan_models({})], [m["name"]])
+
+    def test_the_head_is_found_where_the_menu_puts_it(self):
+        m = self.model(os.path.join(self.t, "models", "x"))
+        self.assertIsNone(L.mtp_head_for(m))
+        self.assertEqual(L.mtp_head_for(m), None)
+        p = self.head(m["dir"])
+        self.assertEqual(L.mtp_head_for(m), p)                                         # in the MTP folder next to it
+        os.remove(p); self.head(m["dir"], size=1000)
+        self.assertIsNone(L.mtp_head_for(m))                                           # a cut-off file is not used
+        # a model in the Hugging Face cache: the menu puts the head in ~/models/<repo>/MTP/, and finds it there
+        hub = os.path.join(self.t, "hub"); snap = os.path.join(hub, "models--unsloth--Qwen3.8-27B-GGUF", "snapshots", self.REV)
+        cached = self.model(snap); cached["repo"] = "unsloth/Qwen3.8-27B-GGUF"
+        models = os.path.join(self.t, "dl")
+        with mock.patch.object(L, "MODELS_DIR", models), mock.patch.object(L, "hf_cache", lambda: hub), \
+             mock.patch.object(L, "DEFAULT_DIRS", []), mock.patch.object(L, "scan_models", lambda st: [cached]):
+            entry = next(d for d in L.DOWNLOADS if d["files"][0][0] == "Qwen3.8-27B-UD-IQ1_S.gguf")
+            with mock.patch.object(L, "have_file", lambda n, s, st=None: cached["path"] if n == cached["name"] else None):
+                self.assertEqual(L.target_dir(entry, {}), L.dl_dest(entry))
+                self.assertEqual([f[0] for f in L.missing_files(entry, {})], [self.HEAD[0]])
+                p = self.head(L.dl_dest(entry))
+                self.assertEqual(L.missing_files(entry, {}), [])                       # the menu counts it as there ...
+                self.assertEqual(L.mtp_head_for(cached), p)                            # ... and the launcher finds it
+        bonsai = self.model(self.t, "Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf", nextn=1)
+        self.assertIsNone(L.mtp_head_for(bonsai))                                      # a built-in head: no separate file
+
+    def run_choose(self, m, tuned=None, mem=None):
+        asked = []
+        st = {"models": {m["name"]: mem}} if mem else {}
+        with mock.patch.object(L, "load_tuned", lambda: tuned or {}), mock.patch.object(L, "yes", lambda q, default=True: asked.append((q, default)) or default), \
+             mock.patch("builtins.print"):
+            c = L.choose(st, m, ask_ctx=False)
+        return c, asked
+
+    def test_mtp_is_offered_only_with_the_head(self):
+        m = self.model(self.t)
+        c, asked = self.run_choose(m)
+        self.assertEqual((c["mtp"], [q for q, _ in asked if "MTP" in q]), (False, []))   # no head file: not asked
+        self.head(self.t)
+        c, asked = self.run_choose(m)
+        self.assertEqual([d for q, d in asked if "MTP" in q], [False])                   # asked; off until measured
+        k_on = L.setting_key(m["name"], True, False)
+        c, asked = self.run_choose(m, {f"{m['name']}|{k_on}": {"max_ctx": 20480, "suggested": 18432}})
+        self.assertEqual([d for q, d in asked if "MTP" in q], [True])                    # llm-tune found MTP on fits
+        self.assertTrue(c["mtp"])
+
+    def test_the_server_loads_the_head_as_the_draft_model(self):
+        m = self.model(self.t); head = self.head(self.t)
+        a = " ".join(L.server_argv("llama-server", m, 16384, True, 2, None, False, 8080))
+        self.assertIn(f"--spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-p-min 0 -ctkd q4_0 -ctvd q4_0 -md {head} -ngld 999", a)
+        self.assertIn("--temp 1.0 --top-p 0.95 --top-k 20", a)                           # Qwen3.8-27B's own sampling
+        a = L.server_argv("llama-server", m, 16384, False, 2, None, False, 8080)
+        self.assertNotIn("-md", a); self.assertNotIn("--spec-type", a)
+        b = self.model(self.t, "Ternary-Bonsai-2.5-27B-PTQ1_0-mtp.gguf", nextn=1)
+        self.assertNotIn("-md", L.server_argv("llama-server", b, 41984, True, 3, None, False, 8080))
+        q = self.model(os.path.join(self.t, "own"), nextn=1); self.head(q["dir"])          # a file with its own head: that one is used
+        self.assertNotIn("-md", L.server_argv("llama-server", q, 16384, True, 2, None, False, 8080))
+
+    def test_llm_tune_measures_mtp_off_and_on_when_the_head_is_there(self):
+        m = self.model(self.t)
+        self.assertEqual([s["mtp"] for s, k in T.settings_for(m)], [False])
+        self.head(self.t)
+        got = T.settings_for(m)
+        self.assertEqual([(s["mtp"], k) for s, k in got], [(False, "mtp=off,images=cpu"), (True, "mtp=on,images=cpu")])
+
+    def test_the_inventory_lists_them_as_being_tested(self):
+        home = os.path.join(self.t, "home"); d = os.path.join(home, "models", "q")
+        self.model(d); self.head(d); self.model(d, "Qwen3.8-27B-UD-IQ1_M.gguf")
+        os.remove(os.path.join(d, self.HEAD[0])); self.head(d)
+        out = []
+        real_isdir = os.path.isdir
+        with mock.patch.object(L, "HOME", home), mock.patch.object(L, "save_state", lambda st: None), \
+             mock.patch.object(L.os.path, "isdir", lambda p: False if p in ("/mnt",) or p.startswith(("/media/", "/run/media/")) else real_isdir(p)), \
+             mock.patch("builtins.print", lambda *a, **k: out.append(" ".join(map(str, a)))):
+            L.inventory({})
+        text = "\n".join(out)
+        self.assertIn("Qwen3.8-27B-UD-IQ1_S.gguf", text); self.assertIn("Qwen3.8-27B-UD-IQ1_M.gguf", text)
+        self.assertIn("being tested for 8 GB", text); self.assertIn("its MTP head file is there", text)
+        self.assertNotIn("mtp-Qwen3.8-27B-Q4_0.gguf  ", text)
+
+
+class TestBuildPin(unittest.TestCase):
+    """The kit installs PrismML's prism-b12232-f702476: the CUDA 12.8 build for driver 570 or newer, else 12.4, each
+    checked by its published sha256; setup_version moved on, so the launcher offers to run setup.sh after the update."""
+    TAG = "prism-b12232-f702476"
+    SHA = {"12.8": "5aeef1a6c543765a488920a771c4cde0931b95f4cb52dfa9aa3c7e0e106d329f",
+           "12.4": "b5750a2e4eb7369093d5ec7a1e82bf3e3772fefd5e398a46e8f245d4fb3490ed"}
+
+    def read(self, f):
+        with open(os.path.join(KIT, f)) as fh: return fh.read()
+
+    def test_setup_installs_the_new_build(self):
+        s = self.read("setup.sh")
+        self.assertIn(f"PRISM={self.TAG}", s)
+        self.assertIn('grep -q "build 12232"', s)                   # its --version prints "version: ... (build 12232, commit f702476)"
+        self.assertIn(f'if [ "${{major:-0}}" -ge 570 ]; then cu=12.8; sha={self.SHA["12.8"]}', s)
+        self.assertIn(f'else cu=12.4; sha={self.SHA["12.4"]}; fi', s)
+        self.assertIn('releases/download/$PRISM/$t', s)
+        self.assertNotIn("12178", s)
+        with open(os.path.join(KIT, "kit.json")) as f: self.assertEqual(json.load(f)["setup_version"], 3)
+
+    def test_the_readme_install_steps_match(self):
+        r = self.read("README.md")
+        t = f"llama-{self.TAG}-bin-linux-cuda-12.8-x64.tar.gz"
+        self.assertIn(f"releases/download/{self.TAG}/{t}", r)
+        self.assertIn(f"sha256sum {t}   # {self.SHA['12.8']}", r)
+        self.assertIn("PrismML build prism-b12232", r)
+        self.assertIn("## What was measured (8 GB, q4_0 K/V cache, PrismML prism-b12178)", r)   # the measurements keep their build
+
+
 class TestRamSignals(unittest.TestCase):
     def test_majflt_reads_field_12(self):
         with tempfile.NamedTemporaryFile("w", suffix=".stat", delete=False) as f:
