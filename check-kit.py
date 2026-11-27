@@ -17,7 +17,9 @@ Rules:
       * at most one replaces opencode's turn after a summary (system-prompt.js with continueText, compaction-anchor's
         "no-stop-and-ask", a task driver: it handles that turn itself);
       * a task driver runs alone or with system-prompt.js only: no compaction-anchor parts, focus mode;
-      * each plugin appears once.
+      * each plugin appears once;
+      * every setup has compaction-anchor with its reinsert part, or a task driver: without either, a long session
+        can lose the request to a summary (Kyle 11-26).
 A changed prompt text needs a new file name: the setup name then tells the sessions apart.
 """
 import hashlib, json, os, re, sys, urllib.request
@@ -92,6 +94,8 @@ def check_setup(s, bad):
     if len(turn) > 1: bad.append(f"setup {sid}: {' and '.join(turn)} would both replace the turn after a summary: keep one")
     if td and anchor: bad.append(f"setup {sid}: a task driver runs without the compaction-anchor parts (it handles compaction itself)")
     if td and (td[0].get("options") or {}).get("mode", "focus") != "focus": bad.append(f"setup {sid}: the task driver runs in focus mode only")
+    if not td and "reinsert" not in parts:
+        bad.append(f"setup {sid}: needs compaction-anchor with reinsert, or a task driver (without either, a long session can lose the request to a summary)")
     other = [p.get("name", "?") for p in ps if kind(p) == "other"]
     if other: bad.append(f"setup {sid}: plugins no tested setup used: {', '.join(other)}")
 

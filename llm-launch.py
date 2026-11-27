@@ -853,6 +853,32 @@ def choose_setup(st, kit=None):
     return sets[0]["id"]
 
 
+
+def _keeper(p):
+    src = (p.get("file") or p.get("url") or "").lower()
+    return "compaction-anchor" in src or "task-driver" in src
+
+
+def usable_setup(setup_id, kit=None):
+    """The setup this session can really use. Each setup has the compaction plugin or the task driver; without either a
+    long session can lose your request when opencode summarizes it. If the chosen setup's one cannot be loaded, use
+    another setup whose one can (and say so); if none can, stop here, before a model server starts."""
+    kit = kit or load_kit()
+    sets = kit_setups(kit)
+    chosen = setup_of(setup_id, kit)
+    order = [chosen] + [s for s in sets if s is not chosen]
+    for s in order:
+        keep = [p for p in s.get("plugins", []) if _keeper(p)]
+        if keep and all(plugin_path(p, quiet=True) for p in keep):
+            if s is not chosen:
+                print(f"{R}   {chosen.get('name', chosen['id'])} cannot be used: its plugin is missing. "
+                      f"This session uses {s.get('name', s['id'])} instead.{N}")
+            return s["id"]
+    raise SystemExit(f"{R}Neither the compaction plugin nor the task driver can be loaded, and a session without them can lose "
+                     f"your request when it gets long. Run llm-launch --fetch-plugins to see what is missing, or "
+                     f"llm-launch --update to restore the kit's files.{N}")
+
+
 def session_config(prov, setup_id=None):
     """What this launcher adds for its own opencode sessions only (your opencode.json keeps none of it): the plugins of
     the chosen kit.json setup (today's default: the v1.1 system prompt in place of opencode's own instructions, your
@@ -1466,7 +1492,7 @@ def attach(port):
     name = os.path.basename(path.rstrip("/")); mid = model_id(name)
     print(f"Model server on port {port}: {name}, {ctx:,} tokens of context")
     st = load_state()
-    sid = choose_setup(st)
+    sid = usable_setup(choose_setup(st))
     prov = update_opencode_config(mid, f"{name} ({ctx // 1000}k)", ctx, port)
     env = opencode_env(session_config(prov, sid))
     print(f"Starting opencode with {PROVIDER}/{mid} in {os.getcwd()}")
@@ -1515,7 +1541,7 @@ def main():
     exl = model.get("engine") == "exl3"
     while True:
         c = choose_exl3(st, model) if exl else choose(st, model)
-        sid = choose_setup(st)
+        sid = usable_setup(choose_setup(st))
         port = DEFAULT_PORT
         while not port_free(port): port += 1
         log = os.path.join(LOG_DIR, f"{'tabbyapi' if exl else 'llama-server'}-{time.strftime('%Y%m%d-%H%M%S')}.log")

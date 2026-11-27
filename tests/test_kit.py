@@ -239,6 +239,45 @@ class TestCheckKit(unittest.TestCase):
     def test_this_kit_passes(self):
         with open(os.path.join(KIT, "kit.json")) as f: self.assertEqual(C.check(json.load(f)), [])
 
+    def test_a_setup_without_reinsert_or_a_task_driver_is_refused(self):
+        """Kyle 11-26: every session has the compaction plugin (with reinsert) or the task driver. Without either, a
+        long session can lose the request to a summary (a model asked for the bug texts back after 14 summaries)."""
+        checklist_only = {"file": "plugins/compaction-anchor.js", "options": {"parts": ["checklist"]}}
+        for combo in [(self.SP_CONT,), (self.SP,), (), (checklist_only, self.SP_CONT)]:
+            out = self.bad(*combo)
+            self.assertTrue(any("reinsert" in x and "task driver" in x for x in out), (combo, out))
+        self.assertEqual(self.bad(self.A, self.SP_CONT), [])
+        self.assertEqual(self.bad(self.SP, self.TD), [])
+
+
+class TestKeeperPlugins(unittest.TestCase):
+    """The launcher never starts a session without the compaction plugin or the task driver: if the chosen setup's one
+    cannot be loaded, it uses the other setup (saying so), and if neither can be, it stops before starting anything."""
+    KIT_JSON = {"setups": [
+        {"id": "standard", "name": "std", "default": True, "plugins": [
+            {"name": "anchor", "file": "plugins/compaction-anchor.js", "options": {"parts": ["checklist", "reinsert"]}},
+            {"name": "sp", "file": "plugins/system-prompt.js"}]},
+        {"id": "task-driver", "name": "td", "ask": "?", "plugins": [
+            {"name": "sp", "file": "plugins/system-prompt.js"},
+            {"name": "driver", "file": "plugins/opencode-task-driver-0.4.1.js"}]}]}
+
+    def run_with(self, missing, sid):
+        have = lambda p, quiet=False: None if p["file"] in missing else "/x/" + p["file"]
+        with mock.patch.object(L, "plugin_path", have), mock.patch("builtins.print"):
+            return L.usable_setup(sid, self.KIT_JSON)
+
+    def test_the_chosen_setup_is_kept_when_its_plugins_load(self):
+        self.assertEqual(self.run_with(set(), "task-driver"), "task-driver")
+        self.assertEqual(self.run_with({"plugins/system-prompt.js"}, "standard"), "standard")   # the prompt alone may be missing
+
+    def test_a_missing_keeper_switches_to_the_other_setup(self):
+        self.assertEqual(self.run_with({"plugins/opencode-task-driver-0.4.1.js"}, "task-driver"), "standard")
+        self.assertEqual(self.run_with({"plugins/compaction-anchor.js"}, "standard"), "task-driver")
+
+    def test_neither_keeper_stops_before_a_session(self):
+        with self.assertRaises(SystemExit):
+            self.run_with({"plugins/compaction-anchor.js", "plugins/opencode-task-driver-0.4.1.js"}, "standard")
+
     def test_a_prompt_with_a_trailing_newline_is_refused(self):
         with tempfile.TemporaryDirectory() as t, mock.patch.object(C, "KIT", t):
             os.makedirs(os.path.join(t, "prompts")); os.makedirs(os.path.join(t, "plugins"))
